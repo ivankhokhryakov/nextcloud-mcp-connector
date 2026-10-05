@@ -27,7 +27,7 @@ import logging
 import os
 import secrets
 import stat
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -48,6 +48,8 @@ ENV_DISABLE_DNS_REBINDING = "NC_MCP_DISABLE_DNS_REBINDING_PROTECTION"
 ENV_PUBLIC_URL = "NC_MCP_PUBLIC_URL"
 ENV_TALK_SEND = "NC_MCP_TALK_SEND"
 ENV_FILES_ROOT = "NC_MCP_FILES_ROOT"
+# Comma separated tool bundle names whose tools are not registered (issue #15).
+ENV_DISABLED_TOOLS = "NC_MCP_DISABLED_TOOLS"
 
 # The audit log of phase 18. The first one is the switch the whole feature hangs on (D-14),
 # the other two move the two limits of the store (D-09). All three read by the three
@@ -310,6 +312,35 @@ def files_root(env: Mapping[str, str] | None = None) -> str:
     """Return the configured virtual root for every Nextcloud file operation."""
     source = os.environ if env is None else env
     return normalize_files_root(source.get(ENV_FILES_ROOT, "/"))
+
+
+def disabled_bundles(known: Iterable[str], env: Mapping[str, str] | None = None) -> frozenset[str]:
+    """Return the tool bundles ``NC_MCP_DISABLED_TOOLS`` switches off, empty when unset.
+
+    The switch shrinks the tool surface a model sees, it is not an access control: search,
+    fetch and prepare_context still reach the content of a switched off bundle. A name that
+    is not a bundle stops the start instead of being ignored, and so does a value that
+    switches every bundle off, because a server without tools is a misconfiguration.
+    """
+    source = os.environ if env is None else env
+    valid = sorted(known)
+    names = frozenset(
+        entry.strip().lower()
+        for entry in source.get(ENV_DISABLED_TOOLS, "").split(",")
+        if entry.strip()
+    )
+    unknown = sorted(names - set(valid))
+    if unknown:
+        raise ToolError(
+            message=f"{ENV_DISABLED_TOOLS} names unknown tool bundles: {', '.join(unknown)}.",
+            hint=f"Valid bundle names: {', '.join(valid)}. Separate them with commas.",
+        )
+    if valid and names >= set(valid):
+        raise ToolError(
+            message=f"{ENV_DISABLED_TOOLS} switches every tool bundle off.",
+            hint="Unset the variable or leave at least one bundle on.",
+        )
+    return names
 
 
 def load_stdio_credentials(env: Mapping[str, str] | None = None) -> Credentials:

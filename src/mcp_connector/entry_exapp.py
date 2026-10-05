@@ -53,7 +53,7 @@ from .oauth.provider import NextcloudOAuthProvider, auth_routes
 from .oauth.registry import client_policy
 from .oauth.store import store_opener
 from .oauth.verifier import StoreTokenVerifier
-from .server import mcp
+from .server import bundle_names, mcp
 
 __all__ = ["build_exapp_app", "main"]
 
@@ -100,6 +100,15 @@ def build_exapp_app(env: Mapping[str, str] | None = None) -> Starlette:
         )
     else:
         logger.info("the file tools are bound to %s (%s)", root, config.ENV_FILES_ROOT)
+    disabled = config.disabled_bundles(bundle_names(), env)
+    if disabled:
+        logger.info(
+            "the tool bundles %s are switched off (%s)",
+            ", ".join(sorted(disabled)),
+            config.ENV_DISABLED_TOOLS,
+        )
+    else:
+        logger.info("all tool bundles are on (%s is not set)", config.ENV_DISABLED_TOOLS)
     security = TransportSecuritySettings(
         allowed_hosts=config.allowed_hosts(env),
         enable_dns_rebinding_protection=config.dns_rebinding_protection(env),

@@ -29,7 +29,7 @@ import httpx
 from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
 
-from .. import __version__, deps
+from .. import __version__, config, deps
 from ..audit import OUTCOME_FAILED, OUTCOME_OK, OUTCOME_REJECTED, record
 from ..errors import (
     REASON_TIMEOUT,
@@ -38,7 +38,7 @@ from ..errors import (
     ToolError,
 )
 
-__all__ = ["CREATE_ONLY", "READ_ONLY", "compact", "graceful", "mcp"]
+__all__ = ["CREATE_ONLY", "READ_ONLY", "bundle_names", "compact", "graceful", "mcp"]
 
 # (None, None) unless a static bearer is configured. The SDK rejects one without the
 # other with a ValueError in the constructor, so they are built as a pair.
@@ -139,16 +139,36 @@ def graceful[T](fn: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
     return wrapper
 
 
+def bundle_names() -> list[str]:
+    """Return the sorted tool bundle names, the suffixes of the ``reg_*`` modules.
+
+    These names are public API: ``NC_MCP_DISABLED_TOOLS`` takes them, and a contract test
+    freezes them together with the tools behind each one.
+    """
+    return sorted(
+        module.name.removeprefix("reg_")
+        for module in pkgutil.iter_modules(__path__)
+        if module.name.startswith("reg_")
+    )
+
+
 def _load_registrations() -> None:
     """Import every ``reg_*`` module so its tools register themselves.
 
     Each tool bundle owns its own registration file. That way plans that are written in
     parallel never have to change one shared file, and a new bundle is a new file plus
     nothing else.
+
+    This is also the switch point of ``NC_MCP_DISABLED_TOOLS`` (issue #15): a bundle named
+    there is not imported, so its tools are not registered. Only the registration is
+    switched, the logic under ``tools/`` stays importable, because search, fetch and
+    prepare_context build on it.
     """
-    for module in pkgutil.iter_modules(__path__):
-        if module.name.startswith("reg_"):
-            importlib.import_module(f"{__name__}.{module.name}")
+    names = bundle_names()
+    disabled = config.disabled_bundles(names)
+    for name in names:
+        if name not in disabled:
+            importlib.import_module(f"{__name__}.reg_{name}")
 
 
 _load_registrations()
