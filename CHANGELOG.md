@@ -11,6 +11,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Fetching a single Talk message now returns the complete message within the fetched-text budget, or an explicit error when that budget is exceeded. The previous `metadata.truncated` field is no longer returned for message fetches; bounded `talk_browse` previews are unchanged.
+
 ## [0.4.0] - 2026-10-01
 
 ### Added

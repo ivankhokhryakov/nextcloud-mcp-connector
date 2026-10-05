@@ -687,7 +687,9 @@ def _is_kept(raw: dict[str, Any]) -> bool:
     return str(raw.get("messageType") or "") in KEPT_TYPES
 
 
-def _message(raw: dict[str, Any], screen: FileScreen) -> dict[str, Any]:
+def _message(
+    raw: dict[str, Any], screen: FileScreen, *, max_bytes: int | None = None
+) -> dict[str, Any]:
     """Project one message: who wrote what, when, and whether this is all of it.
 
     Left out by name: ``reactions`` (a mandatory field on every single message, bytes without
@@ -700,7 +702,9 @@ def _message(raw: dict[str, Any], screen: FileScreen) -> dict[str, Any]:
     chat message is the cheapest place for it of all, because every participant of a
     conversation may write one.
     """
-    text, cut = _capped(_resolve(raw.get("message"), raw.get("messageParameters"), screen))
+    text, cut = _capped(
+        _resolve(raw.get("message"), raw.get("messageParameters"), screen), max_bytes=max_bytes
+    )
     entry: dict[str, Any] = {
         "id": raw.get("id"),
         "timestamp": _number(raw.get("timestamp")),
@@ -721,7 +725,11 @@ def _message(raw: dict[str, Any], screen: FileScreen) -> dict[str, Any]:
 
 
 def one_message(
-    window: list[dict[str, Any]], message_id: str, *, screen: FileScreen
+    window: list[dict[str, Any]],
+    message_id: str,
+    *,
+    screen: FileScreen,
+    max_bytes: int | None = None,
 ) -> dict[str, Any] | None:
     """One named message out of a context window, or ``None`` if it cannot be read.
 
@@ -742,6 +750,9 @@ def one_message(
     going through it inherits both; a copy of either step would be a second truth about
     foreign text (ME-03).
 
+    ``max_bytes`` lets a single-message fetch use its own bounded budget; browse
+    keeps the default preview limit. Resolution and exclusions remain identical.
+
     ``screen`` is keyword-only and has no default, so no caller can forget the file screen
     (D-27-06): whoever has no file to screen passes :data:`NO_SCREEN` visibly.
     """
@@ -749,7 +760,7 @@ def one_message(
     for raw in window:
         if str(raw.get("id")) != wanted:
             continue
-        return _message(raw, screen) if _is_kept(raw) else None
+        return _message(raw, screen, max_bytes=max_bytes) if _is_kept(raw) else None
     return None
 
 
@@ -803,18 +814,19 @@ def _is_mention(key: str, entry: dict[str, Any]) -> bool:
     return key.casefold().startswith("mention")
 
 
-def _capped(text: str) -> tuple[str, bool]:
-    """One text at :data:`MAX_MESSAGE_BYTES`, and whether it had to be cut.
+def _capped(text: str, *, max_bytes: int | None = None) -> tuple[str, bool]:
+    """One text at the requested byte budget (the preview limit by default), plus cut status.
 
     The cut is measured on the UTF-8 encoding, because TALK-02 asks for a byte cap and because
     a byte is what an answer actually costs. Slicing the encoded form can land in the middle of
     a multi byte character, so the decode drops what it cannot read: an umlaut at the cutting
     point disappears instead of arriving as a broken character.
     """
+    limit = MAX_MESSAGE_BYTES if max_bytes is None else max_bytes
     blob = text.encode("utf-8")
-    if len(blob) <= MAX_MESSAGE_BYTES:
+    if len(blob) <= limit:
         return text, False
-    return blob[:MAX_MESSAGE_BYTES].decode("utf-8", errors="ignore"), True
+    return blob[:limit].decode("utf-8", errors="ignore"), True
 
 
 async def one_room(clients: NcClients, token: str, *, include_last_message: bool) -> dict[str, Any]:

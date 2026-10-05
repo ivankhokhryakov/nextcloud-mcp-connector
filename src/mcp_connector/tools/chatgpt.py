@@ -729,11 +729,10 @@ async def _fetch_message(clients: NcClients, token: str, message_id: str) -> dic
     an empty success is the shape that invites a model to fill the gap itself (threat T-11-17).
 
     The selection runs through ``talk_tools.one_message``, so the text arrives with the message
-    parameters resolved and the marker sequences of this server removed, and it arrives cut at
-    ``talk.MAX_MESSAGE_BYTES``. This branch appends **no** marker of its own to it: a cut
-    message text carries none by decision of phase 9, because a marker inside a text every
-    participant of a conversation may write is an attack path (ME-03), and the fact stands
-    beside the text as ``metadata["truncated"]`` instead.
+    parameters resolved and the marker sequences of this server removed. A single fetch
+    uses the existing fetched-text budget rather than the 800-byte history preview.
+    Oversized resolved messages are refused explicitly, never returned as a partial
+    success with no way to retrieve the missing tail.
 
     The ``kein-ki`` guard is inherited twice: ``one_room`` refuses a file conversation of a
     withheld file like an unknown token, and the file screen of the talk module keeps the
@@ -752,7 +751,7 @@ async def _fetch_message(clients: NcClients, token: str, message_id: str) -> dic
     screen = await talk_tools.file_screen(
         clients, [raw for raw in window if str(raw.get("id")) == wanted]
     )
-    entry = talk_tools.one_message(window, message_id, screen=screen)
+    entry = talk_tools.one_message(window, message_id, screen=screen, max_bytes=MAX_TEXT_BYTES)
     if entry is None:
         raise ToolError(
             message=(
@@ -785,11 +784,10 @@ async def _fetch_message(clients: NcClients, token: str, message_id: str) -> dic
         # reading of the same field would be a second truth about when this was written.
         metadata["timestamp"] = str(timestamp)
     if entry.get("message_truncated"):
-        # The two names go apart on purpose here. The projection of ``talk_browse`` carries two
-        # levels in one answer and therefore needs two words (``truncated`` for the cut window,
-        # ``message_truncated`` for the cut text of one entry, DF-11-01); ``fetch`` answers one
-        # single message, so its ``metadata`` has one level and one word is unambiguous there.
-        metadata["truncated"] = "true"
+        raise ToolError(
+            message="The resolved Talk message exceeds the fetched-text byte budget.",
+            hint="Open this message in Nextcloud Talk to read it in full.",
+        )
     if screen.unavailable:
         # A message is not a file: it stays readable with its file placeholders raw, and the
         # one sentence says why (D-27-05, D-27-06).

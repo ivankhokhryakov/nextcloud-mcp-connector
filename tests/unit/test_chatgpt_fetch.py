@@ -29,8 +29,8 @@ messages and the assertions name the two that must not appear. Beside it stand t
 refusals that must never become an empty success (the wanted message missing from the window,
 and the empty window of a 304), the system message that is filtered rather than answered, the
 placeholder resolution that ``{actor}`` proves, the token out of a model answer that never
-reaches the context route, and the cut that says so beside the text because phase 9 put no
-marker into a text every participant of a conversation may write.
+reaches the context route, full retrieval beyond the browse preview, and explicit refusal
+above the fetched-text budget. No server marker is inserted into a participant's text.
 
 For ``table:<tableId>`` the wrong answer is a guessed table: one that carries no row, or one
 whose header row is mistaken for content, would be answered with a title and nothing else. That
@@ -50,6 +50,7 @@ import pytest
 import respx
 from mcp import Client
 
+from mcp_connector import deps
 from mcp_connector.errors import AppMissingError, ToolError
 from mcp_connector.models import FetchResult
 from mcp_connector.nextcloud import NcClients, capabilities
@@ -1360,22 +1361,64 @@ async def test_a_marker_written_into_a_chat_message_is_gone_from_the_answer(
 
 
 @pytest.mark.anyio
-async def test_a_cut_message_says_so_beside_the_text_and_never_inside_it(
+@pytest.mark.parametrize(
+    "body",
+    ["x" * 909, ("é🙂abc\n" * 120) + "END", "🙂" * 32000],
+    ids=["ascii-909-bytes", "multiline-unicode", "32000-four-byte-characters"],
+)
+async def test_fetch_reads_the_complete_message_beyond_the_browse_preview(
+    clients: NcClients, body: str
+) -> None:
+    target = plain(TALK_MESSAGE_ID, body)
+    preview = talk_tools.one_message([target], str(TALK_MESSAGE_ID), screen=talk_tools.NO_SCREEN)
+    assert preview is not None
+    assert preview["message_truncated"] is True
+    assert len(preview["message"].encode("utf-8")) <= 800
+    with respx.mock(assert_all_called=True) as mock:
+        mock_talk(mock, [target])
+        result = await chatgpt.fetch(clients, f"message:{TOKEN}:{TALK_MESSAGE_ID}")
+    assert result["text"] == f"From: Bob Beispiel\n{body}"
+    assert "truncated" not in result["metadata"]
+    FetchResult.model_validate(result)
+
+
+@pytest.mark.anyio
+async def test_fetch_message_refuses_oversize_instead_of_losing_its_tail(
     clients: NcClients, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Decision of phase 9, inherited here: no marker inside a text a stranger may write."""
-    monkeypatch.setattr(talk_tools, "MAX_MESSAGE_BYTES", 60)
-
+    monkeypatch.setattr(chatgpt, "MAX_TEXT_BYTES", 100)
     with respx.mock(assert_all_called=True) as mock:
-        mock_talk(mock, [plain(TALK_MESSAGE_ID, "Die Maße " + "x" * 200)])
+        mock_talk(mock, [plain(TALK_MESSAGE_ID, "é" * 51)])
+        with pytest.raises(ToolError, match="byte budget"):
+            await chatgpt.fetch(clients, f"message:{TOKEN}:{TALK_MESSAGE_ID}")
 
+
+@pytest.mark.anyio
+async def test_registered_fetch_returns_the_tail_in_structured_output(
+    clients: NcClients, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    body = "x" * 909 + "END-OF-SYNTHETIC-MESSAGE"
+    monkeypatch.setattr(deps, "resolve_clients", lambda ctx: clients)
+    with respx.mock(assert_all_called=True) as mock:
+        mock_talk(mock, [plain(TALK_MESSAGE_ID, body)])
+        async with Client(mcp, raise_exceptions=True) as client:
+            result = await client.call_tool("fetch", {"id": f"message:{TOKEN}:{TALK_MESSAGE_ID}"})
+    assert not result.is_error
+    assert result.structured_content is not None
+    assert result.structured_content["text"] == f"From: Bob Beispiel\n{body}"
+
+
+@pytest.mark.anyio
+async def test_fetch_message_accepts_exact_utf8_budget(
+    clients: NcClients, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(chatgpt, "MAX_TEXT_BYTES", 100)
+    body = "é" * 50
+    with respx.mock(assert_all_called=True) as mock:
+        mock_talk(mock, [plain(TALK_MESSAGE_ID, body)])
         result = await chatgpt.fetch(clients, f"message:{TOKEN}:{TALK_MESSAGE_ID}")
-
-    text = result["text"]
-    assert result["metadata"]["truncated"] == "true", "the cut is a field of its own"
-    assert "[truncated here" not in text, "and never a second marker in foreign text"
-    assert "[excerpt truncated" not in text
-    assert len(text.encode("utf-8")) < 200, "the text really was cut"
+    assert result["text"].endswith(body)
+    assert "truncated" not in result["metadata"]
 
 
 @pytest.mark.anyio
