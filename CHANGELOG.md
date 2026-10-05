@@ -11,6 +11,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `NC_MCP_DISABLED_TOOLS` switches whole tool bundles off, for example `mail,calendar`, so
+  smaller models do not confuse them with the tools of a second MCP server. Every bundle
+  is on unless set. An unknown name or every name at once refuses to start. It hides
+  tools and is not an access control: `search`, `fetch` and `prepare_context` still reach
+  the content of a hidden bundle. Declared for ExApp installations, and the start logs
+  which bundles are off (#15).
+
 ### Changed
 
 - Fetching a single Talk message now returns the complete message within the fetched-text budget, or an explicit error when that budget is exceeded. The previous `metadata.truncated` field is no longer returned for message fetches; bounded `talk_browse` previews are unchanged.

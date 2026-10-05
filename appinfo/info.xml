@@ -516,6 +516,10 @@ Prérequis :
 		  - never saw it: the register command accepted it, the container ran without it,
 		  - and the file tools kept the whole files area. No default here either, the code
 		  - defaults to /, and the start of the app logs which binding took effect.
+		  -
+		  - NC_MCP_DISABLED_TOOLS joins them for issue #15, declared from the start for the
+		  - same reason. No default, the code defaults to every bundle on, and the start of
+		  - the app logs which bundles are switched off.
 		-->
 		<environment-variables>
 			<variable>
@@ -546,6 +550,10 @@ Prérequis :
 				<name>NC_MCP_FILES_ROOT</name>
 				<display-name>Directory the file tools are bound to</display-name>
 				<description>A Nextcloud path such as /Documents/AI, the same for every account of this installation. Unset means the whole files area. When set, the file tools and the file results of search treat this directory as / and cannot reach its parent folders; Notes, Mail, Talk, calendars and the other tools keep their own permissions. A path with a parent reference, a backslash or without a leading slash stops the app at start.</description>			</variable>
+			<variable>
+				<name>NC_MCP_DISABLED_TOOLS</name>
+				<display-name>Tool bundles to switch off</display-name>
+				<description>Comma separated tool bundle names, for example mail,calendar. Unset means every bundle is on. Valid names: calendar, chatgpt, contacts, context, deck, files, mail, notes, search, tables, talk. The tools of a named bundle are not offered to assistants, which helps smaller models that confuse similar tools of a second server. An unknown name, or every name at once, stops the app at start. This is not an access control: search, fetch and prepare_context still reach the content of a switched off bundle; use Nextcloud permissions, the kein-ki tag or NC_MCP_FILES_ROOT for that. The value is read when the app starts.</description>			</variable>
 			<variable>
 				<name>NC_MCP_AUDIT_LOG</name>
 				<display-name>Keep a record of tool calls</display-name>

@@ -2385,6 +2385,9 @@ def test_every_variable_the_code_reads_is_declared_in_the_manifest(
     ``NC_MCP_FILES_ROOT`` shipped with 0.3.0, documented for every mode, and this set held
     its absence for a release, so an ExApp installation ran with the whole files area while
     the administrator had set a sandbox (issue #12).
+
+    Ten became eleven with ``NC_MCP_DISABLED_TOOLS`` (issue #15), declared together with
+    the code that reads it, so the lesson of issue #12 is not learned a second time.
     """
     declared = {
         (variable.findtext("name") or "").strip()
@@ -2399,6 +2402,7 @@ def test_every_variable_the_code_reads_is_declared_in_the_manifest(
         registry.ENV_ALLOWED_CLIENTS,
         config.ENV_TALK_SEND,
         config.ENV_FILES_ROOT,
+        config.ENV_DISABLED_TOOLS,
         config.ENV_AUDIT_LOG,
         config.ENV_AUDIT_RETENTION_DAYS,
         config.ENV_AUDIT_MAX_BYTES,

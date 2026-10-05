@@ -91,6 +91,33 @@ missing app is answered in one sentence, never with an empty result.
 {"query":"budget","count":2,"results":[{"id":"file:4711","title":"Budget 2026.md","url":"https://cloud.example.org/index.php/f/4711","provider":"files","kind":"file"},{"id":"url:https://cloud.example.org/index.php/call/abc123","title":"Khaled","url":"https://cloud.example.org/index.php/call/abc123","provider":"talk-conversations","kind":"url","resolvable":false}]}
 ```
 
+## Switching tool bundles off
+
+- Variable: `NC_MCP_DISABLED_TOOLS`, comma separated bundle names, read at start.
+- Default: unset, every bundle is on.
+- Example: `export NC_MCP_DISABLED_TOOLS=mail,calendar`, useful when a second MCP server
+  already offers mail and calendar and a smaller model confuses the two.
+- Bundles and their tools:
+  - `calendar`: `calendar_list_events`, `calendar_create_event`
+  - `chatgpt`: `search`, `fetch`
+  - `contacts`: `contacts_search`
+  - `context`: `prepare_context`
+  - `deck`: `deck_browse`, `deck_create_card`
+  - `files`: `files_search`, `files_list`, `files_read`, `files_download`,
+    `files_read_as_markdown`, `files_upload`
+  - `mail`: `mail_browse`
+  - `notes`: `notes_search`, `notes_read`, `notes_create`
+  - `search`: `unified_search`
+  - `tables`: `tables_browse`, `tables_create_row`
+  - `talk`: `talk_browse`, `talk_send`
+- An unknown name, or every name at once, stops the server at start with a message that
+  lists the valid names.
+- Not an access control: `search`, `fetch` and `prepare_context` still reach the content
+  of a switched off bundle. Use Nextcloud permissions, the `kein-ki` tag or
+  `NC_MCP_FILES_ROOT` to keep content away from the assistant.
+- ChatGPT connectors expect the `chatgpt` bundle (`search`, `fetch`).
+- The ExApp declares the variable and logs at start which bundles are switched off.
+
 ## Excluding folders: the kein-ki tag
 
 Tag a folder or file with the collaborative tag `kein-ki` and the assistant no longer sees it or anything below it.
