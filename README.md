@@ -94,6 +94,11 @@ missing app is answered in one sentence, never with an empty result.
 ## Switching tool bundles off
 
 - Variable: `NC_MCP_DISABLED_TOOLS`, comma separated bundle names, read at start.
+- Where to set it: as a deploy environment variable of the ExApp, either in the deploy
+  options of the install/update dialog, or on the command line:
+  `occ app_api:app:register mcp_connector --env "NC_MCP_DISABLED_TOOLS=mail,calendar"`
+  (unregister first on an existing installation; user connections survive, the container
+  is recreated). The start log names the bundles that are off.
 - Default: unset, every bundle is on.
 - Example: `export NC_MCP_DISABLED_TOOLS=mail,calendar`, useful when a second MCP server
   already offers mail and calendar and a smaller model confuses the two.
