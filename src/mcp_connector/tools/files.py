@@ -107,15 +107,22 @@ DEFAULT_CONTENT_TYPE = "text/markdown"
 _CONTENT_TYPE_RE = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]+/[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
 _UPLOAD_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
-# ChatGPT file parameters carry a temporary HTTPS URL. Restrict that capability to the
-# OpenAI file CDN so a model cannot turn this write tool into an arbitrary SSRF client.
-_OPENAI_FILE_HOST_SUFFIX = "oaiusercontent.com"
+# ChatGPT file parameters carry a temporary HTTPS URL. OpenAI does not promise one
+# fixed download hostname. ChatGPT can also hand out signed Azure Blob Storage URLs for
+# attachments. Matching is suffix-aware (for example, ``blob.core.windows.net.evil.test``
+# does not match the Azure suffix).
+_OPENAI_FILE_HOST_SUFFIXES = (
+    "oaiusercontent.com",
+    "chatgpt.com",
+    "openai.com",
+    "blob.core.windows.net",
+)
 _OPENAI_FILE_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
 MAX_ATTACHMENT_BYTES = HARD_UPLOAD_CHUNK_BYTES * MAX_UPLOAD_CHUNKS
 
 _FILE_TARGET_HINT = (
     "Give the full path of the new file, for example /Docs/meeting-notes.md. "
-    "This tool writes files; it does not create folders."
+    "To create a folder, call files_upload with only the new folder path."
 )
 
 
@@ -599,6 +606,22 @@ async def download(
     return result
 
 
+async def create_folder(clients: NcClients, path: str) -> dict[str, Any]:
+    """Create exactly one folder and never replace an existing entry.
+
+    The parent must already exist. The same exclusion guard used by file uploads runs
+    before MKCOL, so a folder cannot be created inside a ``kein-ki`` subtree.
+    """
+    target = dav.safe_path(path)
+    if target == config.files_root():
+        raise ToolError(
+            message="The requested folder is the files root, which already exists.",
+            hint="Give a new folder below the root, for example /AI.",
+        )
+    await _writable(clients, target)
+    return await dav.create_folder(clients.client, clients.creds, target)
+
+
 async def upload(
     clients: NcClients,
     path: str,
@@ -657,8 +680,9 @@ def _openai_download_url(value: str) -> str:
         parsed = None
         port = None
     host = (parsed.hostname or "").lower() if parsed is not None else ""
-    trusted_host = host == _OPENAI_FILE_HOST_SUFFIX or host.endswith(
-        f".{_OPENAI_FILE_HOST_SUFFIX}"
+    trusted_host = any(
+        host == suffix or host.endswith(f".{suffix}")
+        for suffix in _OPENAI_FILE_HOST_SUFFIXES
     )
     if (
         parsed is None
@@ -669,8 +693,9 @@ def _openai_download_url(value: str) -> str:
         or (port is not None and port != 443)
         or bool(parsed.fragment)
     ):
+        label = host or "<missing>"
         raise ToolError(
-            message="The attachment download URL is not an allowed ChatGPT file URL.",
+            message=f"The attachment download host {label!r} is not an allowed ChatGPT file host.",
             hint="Attach the file to the ChatGPT message and retry the upload.",
         )
     return raw

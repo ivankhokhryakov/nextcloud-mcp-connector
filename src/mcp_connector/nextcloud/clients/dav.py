@@ -770,6 +770,47 @@ def _entry(path: str, props: dict[str, str]) -> dict[str, Any]:
     }
 
 
+async def create_folder(
+    client: httpx.AsyncClient,
+    creds: Credentials,
+    path: str,
+) -> dict:
+    """Create one WebDAV collection without replacing an existing entry."""
+    target = safe_path(path)
+    response = await client.request("MKCOL", files_url(creds, target), auth=creds.auth())
+    status = response.status_code
+    if status == 201:
+        return {"path": target, "created": True, "kind": "folder"}
+    if status == 405:
+        raise ConflictError(
+            message=f"A file or folder already exists at {target}.",
+            hint="This server never overwrites entries. Choose a different folder name.",
+        )
+    if status == 403:
+        raise ToolError(
+            message=f"No permission to create the folder {target}.",
+            hint="Check the share permissions of the parent folder in Nextcloud.",
+            reason=REASON_PERMISSION_DENIED,
+        )
+    if status == 409:
+        raise parent_missing(target)
+    if status == 423:
+        raise ToolError(
+            message=f"{target} is locked in Nextcloud.",
+            hint="Wait until the other client releases the lock, or choose another name.",
+        )
+    if status == 507:
+        raise ToolError(
+            message=f"Not enough space in Nextcloud for the folder {target}.",
+            hint="Free up quota in Nextcloud and try again.",
+        )
+    _check(response, target)
+    raise ToolError(
+        message=f"Nextcloud answered folder creation at {target} with an unexpected status {status}.",
+        hint="Check the Nextcloud log for that request; the folder was not created.",
+    )
+
+
 async def put_new_file(
     client: httpx.AsyncClient,
     creds: Credentials,

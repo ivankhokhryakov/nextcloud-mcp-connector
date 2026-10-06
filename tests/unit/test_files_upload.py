@@ -28,6 +28,8 @@ SECRET = "app-password-test"
 FILES_ROOT = f"{BASE}/remote.php/dav/files/{USER}"
 TARGET = "/Docs/new-note.md"
 TARGET_URL = f"{FILES_ROOT}/Docs/new-note.md"
+FOLDER = "/AI"
+FOLDER_URL = f"{FILES_ROOT}/AI"
 CONTENT = "# Neue Notiz\nZeile zwei\n"
 UPLOAD_ID = "upload-test"
 UPLOAD_FOLDER_URL = dav.uploads_url(Credentials(BASE, USER, SECRET), UPLOAD_ID, path=TARGET)
@@ -407,6 +409,7 @@ async def test_chatgpt_attachment_streams_to_create_only_put(clients: NcClients)
         "http://files.oaiusercontent.com/file-test",
         "https://example.com/file-test",
         "https://files.oaiusercontent.com.evil.test/file-test",
+        "https://blob.core.windows.net.evil.test/file-test",
         "https://user@files.oaiusercontent.com/file-test",
         "https://files.oaiusercontent.com:444/file-test",
     ],
@@ -415,7 +418,7 @@ async def test_chatgpt_attachment_rejects_untrusted_download_urls_before_network
     clients: NcClients, url: str
 ) -> None:
     with respx.mock as mock:
-        with pytest.raises(ToolError, match="allowed ChatGPT file URL"):
+        with pytest.raises(ToolError, match="allowed ChatGPT file host"):
             await files_tools.upload_attachment(
                 clients,
                 path=TARGET,
@@ -480,3 +483,70 @@ async def test_chatgpt_attachment_size_header_is_bounded_before_nextcloud_write(
 
     assert source.call_count == 1
     assert len(mock.calls) == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://files.oaiusercontent.com/file-test?sig=test",
+        "https://files.chatgpt.com/file-test?sig=test",
+        "https://files.openai.com/file-test?sig=test",
+        "https://oaisdmntprdenmarkeast.blob.core.windows.net/chatgpt-upload/file-test?sig=test",
+    ],
+)
+async def test_chatgpt_attachment_accepts_documented_chatgpt_domains(
+    clients: NcClients, url: str
+) -> None:
+    payload = b"attachment"
+    with respx.mock(assert_all_called=True) as mock:
+        source = mock.get(url).mock(
+            return_value=httpx.Response(
+                200,
+                stream=_OneShotStream(payload),
+                headers={"Content-Length": str(len(payload))},
+            )
+        )
+        put = mock.route(method="PUT", url=TARGET_URL).mock(
+            return_value=httpx.Response(201)
+        )
+        result = await files_tools.upload_attachment(
+            clients,
+            path=TARGET,
+            download_url=url,
+            file_id="file_test",
+        )
+
+    assert source.call_count == 1
+    assert put.call_count == 1
+    assert result["bytes"] == len(payload)
+
+
+@pytest.mark.anyio
+async def test_create_folder_uses_mkcol_and_is_create_only(clients: NcClients) -> None:
+    with respx.mock(assert_all_called=True) as mock:
+        mkcol = mock.route(method="MKCOL", url=FOLDER_URL).mock(
+            return_value=httpx.Response(201)
+        )
+        result = await files_tools.create_folder(clients, FOLDER)
+
+    assert mkcol.call_count == 1
+    assert result == {"path": FOLDER, "created": True, "kind": "folder"}
+
+
+@pytest.mark.anyio
+async def test_create_folder_refuses_existing_entry(clients: NcClients) -> None:
+    with respx.mock(assert_all_called=True) as mock:
+        mock.route(method="MKCOL", url=FOLDER_URL).mock(return_value=httpx.Response(405))
+        with pytest.raises(ConflictError, match="already exists"):
+            await files_tools.create_folder(clients, FOLDER)
+
+
+@pytest.mark.anyio
+async def test_create_folder_reports_missing_parent(clients: NcClients) -> None:
+    nested = "/Missing/AI"
+    nested_url = f"{FILES_ROOT}/Missing/AI"
+    with respx.mock(assert_all_called=True) as mock:
+        mock.route(method="MKCOL", url=nested_url).mock(return_value=httpx.Response(409))
+        with pytest.raises(ToolError, match="parent folder"):
+            await files_tools.create_folder(clients, nested)

@@ -162,7 +162,7 @@ async def files_upload(
     file: OpenAIFile = None,  # pyright: ignore[reportAssignmentType]
     ctx: Context | None = None,
 ) -> str:
-    """Create UTF-8 text, base64 chunks, or a ChatGPT attachment; never overwrites."""
+    """Create a folder from path alone, or upload text/base64/ChatGPT files; never overwrites."""
     clients = deps.resolve_clients(ctx)
     if file is not None:
         if content is not None or content_base64 is not None:
@@ -213,8 +213,5 @@ async def files_upload(
             hint="Send the file bytes as base64, or remove the binary fields for text.",
         )
     if content is None:
-        raise ToolError(
-            message="Send content, content_base64, or a ChatGPT attachment.",
-            hint="For a PDF attached to ChatGPT, pass the file parameter and a new path.",
-        )
+        return compact(await files_tools.create_folder(clients, path=path))
     return compact(await files_tools.upload(clients, path=path, content=content))

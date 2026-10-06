@@ -152,6 +152,7 @@ async def test_files_upload_is_annotated_as_create_only() -> None:
     }
     assert set(file_schema["required"]) == {"download_url", "file_id"}
     assert file_schema.get("additionalProperties") is False
+    assert "folder from path alone" in (tool.description or "")
 
 
 @pytest.mark.anyio
