@@ -9,6 +9,7 @@ app password, server error, path traversal, empty content and a payload that is 
 encodable as UTF-8.
 """
 
+import asyncio
 import base64
 
 import guard_routes
@@ -408,6 +409,9 @@ async def test_chatgpt_attachment_streams_to_create_only_put(clients: NcClients)
         "https://blob.core.windows.net.evil.test/file-test",
         "https://attacker.blob.core.windows.net/file-test",
         "https://oaifakeaccount.blob.core.windows.net/file-test",
+        "https://files.chatgpt.com/file-test",
+        "https://files.openai.com/file-test",
+        "https://community.openai.com/file-test",
         "https://user@files.oaiusercontent.com/file-test",
         "https://files.oaiusercontent.com:444/file-test",
     ],
@@ -488,8 +492,6 @@ async def test_chatgpt_attachment_size_header_is_bounded_before_nextcloud_write(
     "url",
     [
         "https://files.oaiusercontent.com/file-test?sig=test",
-        "https://files.chatgpt.com/file-test?sig=test",
-        "https://files.openai.com/file-test?sig=test",
         "https://oaisdmntprdenmarkeast.blob.core.windows.net/chatgpt-upload/file-test?sig=test",
     ],
 )
@@ -518,6 +520,7 @@ async def test_chatgpt_attachment_accepts_documented_chatgpt_domains(
     assert source.call_count == 1
     assert put.call_count == 1
     assert result["bytes"] == len(payload)
+
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
@@ -555,3 +558,45 @@ async def test_attachment_source_stream_error_never_starts_put(
             )
         assert source.call_count == 1
         assert [call.request.method for call in mock.calls] == ["GET"]
+
+@pytest.mark.anyio
+async def test_attachment_staging_is_serialized(
+    clients: NcClients, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    second_entered = asyncio.Event()
+    calls = 0
+
+    async def writable(*args: object) -> None:
+        return None
+
+    async def staged(*args: object) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            entered.set()
+            await release.wait()
+        else:
+            second_entered.set()
+        return {"created": True}
+
+    monkeypatch.setattr(files_tools, "_writable", writable)
+    monkeypatch.setattr(files_tools, "_stage_attachment", staged)
+
+    async def one(path: str) -> dict[str, object]:
+        return await files_tools.upload_attachment(
+            clients, path=path, download_url=OPENAI_FILE_URL, file_id="file_test"
+        )
+
+    first = asyncio.create_task(one("/Docs/first.pdf"))
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    second = asyncio.create_task(one("/Docs/second.pdf"))
+    try:
+        await asyncio.sleep(0)
+        assert not second_entered.is_set()
+    finally:
+        release.set()
+    await asyncio.gather(first, second)
+    assert calls == 2
+

@@ -109,11 +109,15 @@ _CONTENT_TYPE_RE = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]+/[A-Za-z0-9!#$%&'*+.
 _UPLOAD_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 # Restrict multi-tenant Azure to the verified OpenAI account from a live upload.
-_OPENAI_FILE_HOST_SUFFIXES = ("oaiusercontent.com", "chatgpt.com", "openai.com")
+_OPENAI_FILE_HOST_SUFFIXES = ("oaiusercontent.com",)
 _OPENAI_AZURE_HOSTS = frozenset({"oaisdmntprdenmarkeast.blob.core.windows.net"})
 _OPENAI_FILE_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
 _OPENAI_TOTAL_SECONDS = 300.0
 MAX_ATTACHMENT_BYTES = 512 * 1024 * 1024
+
+# One staged attachment per process (including its PUT and temporary-file cleanup).
+# This bounds cumulative staging disk use even with concurrent MCP requests.
+_ATTACHMENT_STAGING_SEMAPHORE = asyncio.Semaphore(1)
 
 
 _FILE_TARGET_HINT = (
@@ -722,7 +726,14 @@ async def upload_attachment(
         )
     source_url = _openai_download_url(download_url)
     await _writable(clients, target)
+    async with _ATTACHMENT_STAGING_SEMAPHORE:
+        return await _stage_attachment(clients, target, source_url, mime_type)
 
+
+async def _stage_attachment(
+    clients: NcClients, target: str, source_url: str, mime_type: str
+) -> dict[str, Any]:
+    """Stage a single attachment under the process-wide disk usage guard."""
     with tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b") as staged:
         seen = 0
         try:
@@ -747,7 +758,10 @@ async def upload_attachment(
                         )
                     if source.status_code != 200:
                         raise ToolError(
-                            message=f"The attachment download failed with HTTP {source.status_code}.",
+                            message=(
+                                f"The attachment download failed with HTTP "
+                                f"{source.status_code}."
+                            ),
                             hint="Retry the original attachment.",
                         )
                     raw_length = source.headers.get("Content-Length", "").strip()
