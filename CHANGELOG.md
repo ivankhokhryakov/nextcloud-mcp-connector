@@ -11,6 +11,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- The conflict hint of a create-only upload says that uploads never overwrite,
+  instead of claiming it for the whole server, which files_update made untrue.
+
 ## [0.6.0] - 2026-10-18
 
 ### Added
