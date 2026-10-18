@@ -362,7 +362,7 @@ async def test_an_acting_party_is_cleaned_on_the_same_rule_as_a_client_name(
     its own idea of what is printable is how R-18-06 happened once already.
     """
     subject = open_store(tmp_path)
-    hostile = "kc\nclient‮" + "x" * 200
+    hostile = "kc\nclient\u202e" + "x" * 200
     await subject.append(
         store.Entry(
             chain=ALICE,
@@ -378,7 +378,7 @@ async def test_an_acting_party_is_cleaned_on_the_same_rule_as_a_client_name(
     (row,) = rows(tmp_path)
     actor, client_name = row[4], row[9]
     assert "\n" not in actor
-    assert "‮" not in actor
+    assert "\u202e" not in actor
     assert len(actor) <= store.ACTOR_LIMIT
     assert actor == client_name[: store.ACTOR_LIMIT], "one rule, applied twice, not two rules"
 

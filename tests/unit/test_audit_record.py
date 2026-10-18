@@ -49,7 +49,7 @@ ACTING_PARTY = "kc-client-of-another-realm"
 #: U+202E. Inside an output line it turns the reading direction of everything after it
 #: round, which is why the cleaning rule of this project names a character class instead of
 #: listing the C0 range (R-18-06).
-RIGHT_TO_LEFT_OVERRIDE = "‮"
+RIGHT_TO_LEFT_OVERRIDE = "\u202e"
 
 #: The value the third case hunts for. It is not a word of any column name, so a hit is a
 #: leak and never a coincidence.
@@ -427,3 +427,29 @@ async def test_a_hostile_acting_party_is_cleaned_and_cut_before_it_is_written(
     assert RIGHT_TO_LEFT_OVERRIDE not in stored
     assert len(stored) <= ACTOR_LIMIT
     assert stored.startswith("kc client")
+
+
+@pytest.mark.anyio
+async def test_no_table_beside_the_chain_holds_file_paths_or_etags(
+    recorder: Recorder, audit_file: Path
+) -> None:
+    """D-04 and T-18-01: the store knows chains of value-free rows and nothing else.
+
+    A successful ``files_update`` is recorded like every other call, through the graceful
+    wrapper: tool name, outcome and parameter names, never the path or an ETag. This
+    pins the schema so no sidecar table for update values can come back unnoticed.
+    """
+    store_obj = await recorder.store_provider()
+    assert store_obj is not None
+
+    connection = sqlite3.connect(audit_file)
+    try:
+        tables = {
+            name
+            for (name,) in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+    finally:
+        connection.close()
+
+    assert "file_updates" not in tables
+    assert tables <= {"entries", "sqlite_sequence"}

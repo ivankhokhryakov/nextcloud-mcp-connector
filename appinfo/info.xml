@@ -551,6 +551,11 @@ Prérequis :
 				<display-name>Directory the file tools are bound to</display-name>
 				<description>A Nextcloud path such as /Documents/AI, the same for every account of this installation. Unset means the whole files area. When set, the file tools and the file results of search treat this directory as / and cannot reach its parent folders; Notes, Mail, Talk, calendars and the other tools keep their own permissions. A path with a parent reference, a backslash or without a leading slash stops the app at start.</description>			</variable>
 			<variable>
+				<name>NC_MCP_FILES_UPDATE</name>
+				<display-name>Allow updating existing files</display-name>
+				<description>Off unless set to on. When enabled, the files_update tool can replace existing UTF-8 text files only when their current ETag matches the supplied ETag.</description>
+			</variable>
+			<variable>
 				<name>NC_MCP_DISABLED_TOOLS</name>
 				<display-name>Tool bundles to switch off</display-name>
 				<description>Comma separated tool bundle names, for example mail,calendar. Unset means every bundle is on. Valid names: calendar, chatgpt, contacts, context, deck, files, mail, notes, search, tables, talk. The tools of a named bundle are not offered to assistants, which helps smaller models that confuse similar tools of a second server. An unknown name, or every name at once, stops the app at start. This is not an access control: search, fetch and prepare_context still reach the content of a switched off bundle; use Nextcloud permissions, the kein-ki tag or NC_MCP_FILES_ROOT for that. The value is read when the app starts.</description>			</variable>

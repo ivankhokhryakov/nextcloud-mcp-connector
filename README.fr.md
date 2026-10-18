@@ -48,9 +48,12 @@ Le modèle, c'est vous qui l'apportez, et aucun contenu ne quitte votre serveur.
 
 - Rien supprimer : aucun outil n'émet de DELETE sur des fichiers, événements, notes, cartes
   ou contacts
-- Rien écraser : les écritures sont en création seule, et `files_upload` refuse un chemin
-  existant par une erreur claire au lieu de le remplacer ; les fichiers binaires sont envoyés
-  en blocs Base64 de taille totale quelconque
+- Pas d’écrasement inconditionnel : les écritures sont en création seule, et `files_upload`
+  refuse un chemin existant par une erreur claire au lieu de le remplacer ; les fichiers
+  binaires sont envoyés en blocs Base64 de taille totale quelconque. Si l’administrateur
+  active `NC_MCP_FILES_UPDATE`, `files_update` ne remplace un fichier texte UTF-8 existant
+  que si son ETag correspond à la valeur lue auparavant ; les fichiers modifiés ou supprimés
+  sont refusés, et l’historique des versions dépend du backend de stockage
 - Aucun déplacement, aucun renommage, aucune modification de partage ni de permission
 - Mail est strictement en lecture seule : aucun envoi, aucun brouillon, aucun déplacement,
   aucun marquage, aucune suppression, aucun téléchargement de pièce jointe

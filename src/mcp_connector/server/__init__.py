@@ -39,7 +39,15 @@ from ..errors import (
     ToolError,
 )
 
-__all__ = ["CREATE_ONLY", "READ_ONLY", "bundle_names", "compact", "graceful", "mcp"]
+__all__ = [
+    "CREATE_ONLY",
+    "READ_ONLY",
+    "UPDATE_EXISTING",
+    "bundle_names",
+    "compact",
+    "graceful",
+    "mcp",
+]
 
 # (None, None) unless a static bearer is configured. The SDK rejects one without the
 # other with a ValueError in the constructor, so they are built as a pair.
@@ -52,7 +60,13 @@ mcp = MCPServer(
     version=__version__,
     instructions=(
         "Read and create content in the user's own Nextcloud. "
-        "This server can never delete, overwrite or re-share anything."
+        "Files are never deleted, moved, renamed or unconditionally overwritten."
+        + (
+            " Existing UTF-8 text files can be replaced with files_update, "
+            "and only with a matching ETag."
+            if config.files_update_enabled()
+            else ""
+        )
     ),
     token_verifier=_token_verifier,
     auth=_auth_settings,
@@ -63,6 +77,13 @@ READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=False)
 CREATE_ONLY = ToolAnnotations(
     read_only_hint=False,
     destructive_hint=False,
+    idempotent_hint=False,
+    open_world_hint=False,
+)
+
+UPDATE_EXISTING = ToolAnnotations(
+    read_only_hint=False,
+    destructive_hint=True,
     idempotent_hint=False,
     open_world_hint=False,
 )

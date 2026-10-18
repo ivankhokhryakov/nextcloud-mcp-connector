@@ -101,6 +101,7 @@ _SEARCH_PROPS = (
     f"{{{xml.DAV}}}getcontenttype",
     f"{{{xml.DAV}}}getlastmodified",
     f"{{{xml.DAV}}}getcontentlength",
+    f"{{{xml.DAV}}}getetag",
     f"{{{xml.DAV}}}resourcetype",
     f"{{{xml.OC}}}fileid",
 )
@@ -765,6 +766,7 @@ def _entry(path: str, props: dict[str, str]) -> dict[str, Any]:
         "size": int(raw_size) if raw_size.isdigit() else 0,
         "content_type": props.get(f"{{{xml.DAV}}}getcontenttype", ""),
         "last_modified": props.get(f"{{{xml.DAV}}}getlastmodified", ""),
+        "etag": props.get(f"{{{xml.DAV}}}getetag", ""),
         "fileid": props.get(f"{{{xml.OC}}}fileid", ""),
         "permissions": props.get(f"{{{xml.OC}}}permissions", ""),
     }
@@ -794,6 +796,145 @@ async def put_new_file(
         "path": target,
         "etag": response.headers.get("etag", ""),
         "created": True,
+    }
+
+
+#: Exactly one strong quoted validator. SabreDAV's precondition check skips an empty
+#: ``If-Match`` entirely and honours ``*`` and comma lists, so anything but this shape
+#: would silently disarm the compare-and-swap the update tool advertises.
+_STRONG_ETAG = re.compile(r'^"[^",\s]+"$')
+
+
+def normalize_etag(etag: str) -> str:
+    """Return ``etag`` as the one strong quoted validator it must name, or refuse it.
+
+    A bare token (the form a client copies out of a JSON answer) is quoted; everything
+    else that SabreDAV would treat as more or less than one strong ETag, such as ``*``,
+    an empty value, a weak ``W/`` validator or a comma list, is refused before any
+    request leaves this process.
+    """
+    value = (etag or "").strip()
+    if re.fullmatch(r'[^",\s]+', value) and value != "*" and not value.startswith("W/"):
+        value = f'"{value}"'
+    if not _STRONG_ETAG.fullmatch(value) or value.startswith('"W/'):
+        raise ToolError(
+            message=f"{etag!r} is not one strong ETag.",
+            hint=(
+                "Pass the exact etag value the read returned. Empty values, *, weak "
+                "W/ validators and lists are refused."
+            ),
+        )
+    return value
+
+
+def _check_update(response: httpx.Response, path: str) -> None:
+    """Translate responses to an ETag-protected file update."""
+    status = response.status_code
+
+    if status in (404, 412):
+        raise ConflictError(
+            message=f"The file {path!r} changed or was deleted before it could be updated.",
+            hint="Re-read the file and decide whether to retry.",
+        )
+
+    if status in (200, 204):
+        return
+
+    if status == 403:
+        raise ToolError(
+            message=f"No permission to write to {path}.",
+            hint="Check the share permissions of the file in Nextcloud.",
+            reason=REASON_PERMISSION_DENIED,
+        )
+    if status == 423:
+        raise ToolError(
+            message=f"{path} is locked in Nextcloud.",
+            hint="Wait until the other client releases the lock and read the file again.",
+        )
+    if status == 507:
+        raise ToolError(
+            message=f"Not enough space in Nextcloud for {path}.",
+            hint="Free up quota in Nextcloud and try again.",
+        )
+
+    _check(response, path)
+    raise ToolError(
+        message=f"Nextcloud answered the update of {path} with an unexpected status {status}.",
+        hint="Check the Nextcloud log for that request.",
+    )
+
+
+def versions_url(creds: Credentials, fileid: int | str) -> str:
+    """Build the DAV URL of the version listing of one file."""
+    user = quote(creds.user, safe="")
+    return f"{creds.base_url}/remote.php/dav/versions/{user}/versions/{fileid}"
+
+
+async def _count_versions(
+    client: httpx.AsyncClient,
+    creds: Credentials,
+    fileid: int | str,
+) -> int | None:
+    """Count the entries of the DAV version listing, or ``None`` when it cannot be read.
+
+    The listing names the collection itself and already holds one entry for the current
+    content, so a bare count proves nothing about history on its own; the update compares
+    the count before and after its PUT instead. Best-effort by design: a disabled
+    files_versions app or an unsupported storage backend must not turn a successful
+    update into a failure.
+    """
+    if not fileid:
+        return None
+    try:
+        response = await client.request(
+            "PROPFIND",
+            versions_url(creds, fileid),
+            headers={"Depth": "1", "Content-Type": "application/xml"},
+            content=_stat_body(),
+            auth=creds.auth(),
+        )
+        if response.status_code != 207:
+            return None
+        return max(len(xml.parse_multistatus(response.content)) - 1, 0)
+    except (httpx.HTTPError, ToolError, ValueError, etree.LxmlError):
+        return None
+
+
+async def update_file(
+    client: httpx.AsyncClient,
+    creds: Credentials,
+    path: str,
+    data: bytes,
+    content_type: str,
+    etag: str,
+    fileid: int | str = "",
+) -> dict:
+    """Replace an existing file only when its ETag still matches ``etag``.
+
+    ``etag`` arrives already normalized (:func:`normalize_etag`). Everything after the
+    PUT is best-effort reporting: once Nextcloud accepted the write, no follow-up read
+    may turn the answer into an error, or the caller would retry a write that happened.
+    """
+    target = safe_path(path)
+    before = await _count_versions(client, creds, fileid)
+    response = await client.put(
+        files_url(creds, target),
+        content=data,
+        headers={
+            "If-Match": etag,
+            "Content-Type": content_type,
+        },
+        auth=creds.auth(),
+    )
+    _check_update(response, target)
+    after = await _count_versions(client, creds, fileid)
+    versioned = after > before if before is not None and after is not None else None
+    new_etag = response.headers.get("oc-etag", "") or response.headers.get("etag", "")
+    return {
+        "path": target,
+        "etag": new_etag,
+        "size": len(data),
+        "versioned": versioned,
     }
 
 

@@ -434,6 +434,162 @@ def test_the_production_code_contains_no_destructive_request() -> None:
     assert findings == [], "destructive call found:\n" + "\n".join(findings)
 
 
+def test_file_updates_keep_create_and_compare_and_swap_puts_distinct() -> None:
+    """A file update must stay compare-and-swap while file creation stays create-only."""
+    path = SRC / "nextcloud" / "clients" / "dav.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)}
+
+    create = ast.unparse(functions["put_new_file"])
+    update = ast.unparse(functions["update_file"])
+
+    assert "If-None-Match" in create
+    assert "*" in create
+    assert ".put(" in create
+
+    assert "If-Match" in update
+    assert "etag" in update
+    assert ".put(" in update
+
+
+#: A PUT that runs without a precondition header, pinned by file and function. The chunk
+#: protocol writes into Nextcloud's temporary upload folder and its final MOVE carries
+#: ``Overwrite: F``; the init-progress push is the ExApp talking about itself to the
+#: AppAPI control plane, never user content. A third entry here is a review event.
+UNCONDITIONAL_PUTS = {
+    ("nextcloud/clients/dav.py", "put_upload_chunk"),
+    ("exapp/status.py", "report_init_progress"),
+}
+
+#: Every PUT call in the production code, counted. A new PUT that this gate somehow does
+#: not flag still changes the count, so it cannot slip in silently.
+EXPECTED_PUT_CALLS = 5
+
+
+def _usable_precondition(call: ast.Call) -> bool:
+    """A literal headers dict with one If-Match/If-None-Match pair SabreDAV honours.
+
+    A vacuous literal, an empty string, a bare ``*`` for ``If-Match`` or a weak ``W/``
+    validator, is the exact shape SabreDAV waves through, so it counts as absent.
+    """
+    headers = next((kw.value for kw in call.keywords if kw.arg == "headers"), None)
+    if not isinstance(headers, ast.Dict):
+        return False
+    for key, value in zip(headers.keys, headers.values, strict=True):
+        if not isinstance(key, ast.Constant) or key.value not in ("If-Match", "If-None-Match"):
+            continue
+        if isinstance(value, ast.Constant):
+            text = str(value.value).strip()
+            if key.value == "If-Match" and (not text or text == "*" or text.startswith("W/")):
+                return False
+            if key.value == "If-None-Match" and text != "*":
+                return False
+        return True
+    return False
+
+
+def _unconditional_puts(relative: str, tree: ast.AST) -> tuple[list[str], int]:
+    """Every PUT in ``tree`` that could overwrite without a precondition, plus the count.
+
+    Flags ``.put(...)`` calls and ``.request("PUT", ...)`` calls without a usable
+    ``If-Match``/``If-None-Match`` header. The rule deliberately ignores the URL: a PUT
+    through a variable or a helper is held exactly like a spelled-out one, and the two
+    PUTs that legitimately run unconditioned are pinned by name in
+    ``UNCONDITIONAL_PUTS``.
+    """
+    findings: list[str] = []
+    seen = 0
+
+    def _is_put(call: ast.Call) -> bool:
+        if isinstance(call.func, ast.Attribute) and call.func.attr == "put":
+            return True
+        return (
+            isinstance(call.func, ast.Attribute)
+            and call.func.attr == "request"
+            and bool(call.args)
+            and isinstance(call.args[0], ast.Constant)
+            and call.args[0].value == "PUT"
+        )
+
+    class Walker(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.stack: list[str] = []
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            self._function(node)
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            self._function(node)
+
+        def _function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+            self.stack.append(node.name)
+            self.generic_visit(node)
+            self.stack.pop()
+
+        def visit_Call(self, node: ast.Call) -> None:
+            nonlocal seen
+            if _is_put(node):
+                seen += 1
+                where = self.stack[-1] if self.stack else "<module>"
+                if (relative, where) not in UNCONDITIONAL_PUTS and not _usable_precondition(node):
+                    findings.append(
+                        f"{relative}:{node.lineno} in {where}: "
+                        "PUT without a usable If-Match/If-None-Match header"
+                    )
+            self.generic_visit(node)
+
+    Walker().visit(tree)
+    return findings, seen
+
+
+def test_every_put_carries_a_usable_precondition() -> None:
+    """No PUT anywhere in the production code may overwrite unconditionally."""
+    findings: list[str] = []
+    total = 0
+    for path in _source_files():
+        relative = path.relative_to(SRC).as_posix()
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        found, seen = _unconditional_puts(relative, tree)
+        findings.extend(found)
+        total += seen
+
+    assert findings == [], "unconditional PUT found:\n" + "\n".join(findings)
+    assert total == EXPECTED_PUT_CALLS, (
+        f"the production code carries {total} PUT calls, the gate expects "
+        f"{EXPECTED_PUT_CALLS}; a new PUT is a review event, update the pin deliberately"
+    )
+
+
+#: Shapes the gate must flag (counter proofs) and the two legitimate forms it must not.
+_PLANTED_PUTS = [
+    "async def f(client, url, data):\n    await client.put(url, content=data)\n",
+    'async def f(client, url, data):\n    await client.request("PUT", url, content=data)\n',
+    'async def f(client, url):\n    await client.put(url, headers={"Content-Type": "x"})\n',
+    'async def f(client, url):\n    await client.put(url, headers={"If-Match": ""})\n',
+    'async def f(client, url):\n    await client.put(url, headers={"If-Match": "*"})\n',
+    'async def f(client, url):\n    await client.put(url, headers={"If-Match": \'W/"1"\'})\n',
+    'async def f(client, url):\n    await client.put(url, headers={"X-Note": "If-Match"})\n',
+    "async def f(c, u):\n    target = u\n    await c.put(target)\n",
+]
+_HONEST_PUTS = [
+    'async def f(client, url, etag):\n    await client.put(url, headers={"If-Match": etag})\n',
+    'async def f(client, url):\n    await client.put(url, headers={"If-None-Match": "*"})\n',
+]
+
+
+def test_the_put_gate_flags_each_planted_bypass() -> None:
+    """The gate is proven against the shapes it exists for, not assumed (counter proof)."""
+    for source in _PLANTED_PUTS:
+        findings, seen = _unconditional_puts("planted.py", ast.parse(source))
+        assert seen == 1, source
+        assert findings, f"the gate missed a planted bypass:\n{source}"
+    for source in _HONEST_PUTS:
+        findings, seen = _unconditional_puts("planted.py", ast.parse(source))
+        assert seen == 1, source
+        assert findings == [], f"the gate flagged a legitimate PUT:\n{source}"
+
+
 def _is_own_sql(relative: str, text: str) -> bool:
     """True for a statement against our own store file, false for anything else."""
     return relative in FILES_WITH_OWN_SQL and any(form in text for form in SQL_DELETE_FORMS)

@@ -13,6 +13,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `files_update`: replaces one existing UTF-8 text file, whole, and only when
+  the ETag from `files_read` (which now returns it) still matches; `*`, empty
+  values, weak validators and lists are refused before any request. Off by
+  default (`NC_MCP_FILES_UPDATE`). `versioned` is true when the version
+  listing grew, null when it cannot be read. Invisible, tagged and deleted
+  targets share one conflict sentence. Thanks to @Saket7002 (#9, #26) and
+  @DaniW42 for the live-tested review.
+
 - SECURITY.md with the two private reporting channels, CONTRIBUTING.md, issue
   and pull request templates, and THIRD-PARTY.md with the licences of the
   shipped dependencies.
@@ -168,6 +176,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.3.0] - 2026-09-26
 
 ### Added
+
+- Optional `files_update`, disabled by default and registered only when
+  `NC_MCP_FILES_UPDATE` is enabled by an administrator. It replaces existing UTF-8 text files
+  using mandatory `If-Match` ETag checks and rejects stale or deleted files without retrying.
+  Each successful update records the path and old/new ETags in a dedicated audit table.
+  Previous-version retention depends on the Nextcloud storage backend.
 
 - `files_download` returns Nextcloud files as embedded MCP binary resources. It applies the
   caller's existing Nextcloud permissions, refuses folders and supports files of any total
