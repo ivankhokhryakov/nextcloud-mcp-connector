@@ -1228,10 +1228,13 @@ def test_the_topology_guard_refuses_a_foreign_compose_file(
         ("require_port_number NC_EXAPP_APP_PORT '23000,\"system\":true'", 1),
         ("require_port_number NC_EXAPP_APP_PORT ''", 1),
         ("require_port_number NC_EXAPP_APP_PORT '23000 '", 1),
+        ("require_port_number NC_EXAPP_APP_PORT '23000\n\"system\":true'", 1),
+        ("require_port_number NC_EXAPP_APP_PORT '23000\rX'", 1),
         ("require_registry_shape '127.0.0.1:5000'", 0),
         ("require_registry_shape 'ghcr.io'", 0),
         ('require_registry_shape \'127.0.0.1:5000","image":"evil\'', 1),
         ("require_registry_shape ''", 1),
+        ("require_registry_shape '127.0.0.1:5000\nX'", 1),
         ("require_url_shape NC_EXAPP_PUBLIC_URL 'https://cloud.test/exapps/mcp_connector'", 0),
         ("require_url_shape NC_EXAPP_PUBLIC_URL 'http://127.0.0.1:8081/exapps/mcp_connector'", 0),
         ("require_url_shape NC_EXAPP_PUBLIC_URL 'https://cloud.example.com'", 0),
@@ -1247,10 +1250,13 @@ def test_the_topology_guard_refuses_a_foreign_compose_file(
         "a port with a JSON injection",
         "an empty port",
         "a port with trailing whitespace",
+        "a port with a second line",
+        "a port with a carriage return",
         "a registry with a port",
         "a bare registry host",
         "a registry with a JSON injection",
         "an empty registry",
+        "a registry with a second line",
         "the public address of a real instance",
         "the local default with its port",
         "a public address without a path",
@@ -1640,6 +1646,86 @@ def test_a_missing_env_file_still_generates_a_fresh_secret(tmp_path: Path) -> No
 
     assert result.returncode == 0, result.stderr
     assert re.fullmatch(r"[0-9a-f]{64}", result.stdout.strip()), result.stdout
+
+
+@needs_bash
+@pytest.mark.parametrize(
+    ("value", "expected_code"),
+    [
+        (GOOD_SECRET, 0),
+        (f"{GOOD_SECRET}\n{GOOD_SECRET}", 1),
+        (f"{GOOD_SECRET}\r", 1),
+        (GOOD_SECRET.upper(), 1),
+    ],
+    ids=[
+        "a generated secret",
+        "a secret with a second line",
+        "a secret with a carriage return",
+        "an upper case secret",
+    ],
+)
+def test_require_hex64_refuses_anything_but_one_hex_line(value: str, expected_code: int) -> None:
+    """A line based match would accept two valid lines as one secret, and the second line
+    would then travel into the environment file and the registration payload."""
+    script = (
+        "set -euo pipefail\n"
+        f"{shell_function('require_hex64')}\n"
+        f"require_hex64 APP_SECRET '{value}' .env.exapp\n"
+    )
+
+    result = run_bash(script)
+
+    assert result.returncode == expected_code, result.stderr
+
+
+SPIKE_BOOTSTRAP = BOOTSTRAP.parent / "bootstrap_spike_opendesk.sh"
+REGISTRATION_VALIDATORS = (
+    "require_hex64",
+    "require_port_number",
+    "require_registry_shape",
+    "require_url_shape",
+)
+
+
+@needs_bash
+@pytest.mark.parametrize(
+    ("call", "expected_code"),
+    [
+        ("require_port_number NC_SPIKE_OD_APP_PORT '23000'", 0),
+        ("require_port_number NC_SPIKE_OD_APP_PORT '23000\n\"system\":true'", 1),
+        ("require_registry_shape '127.0.0.1:5000\nX'", 1),
+        ("require_url_shape NC_SPIKE_OD_PUBLIC_URL 'https://ok.example.com\n\"evil\":1'", 1),
+        (f"require_hex64 APP_SECRET '{GOOD_SECRET}\n{GOOD_SECRET}' .env.spike", 1),
+    ],
+    ids=[
+        "a plain port",
+        "a port with a second line",
+        "a registry with a second line",
+        "a public address with a second line",
+        "a secret with a second line",
+    ],
+)
+def test_the_spike_validators_refuse_multiline_values(call: str, expected_code: int) -> None:
+    """Both scripts carry the same validators, so the spike copy must not keep the line
+    based hole the main bootstrap closed."""
+    script = "set -euo pipefail\n"
+    for name in REGISTRATION_VALIDATORS:
+        script += f"{shell_function(name, SPIKE_BOOTSTRAP)}\n"
+    script += f"{call}\n"
+
+    result = run_bash(script)
+
+    assert result.returncode == expected_code, result.stderr
+
+
+@pytest.mark.parametrize(
+    "path", [BOOTSTRAP, SPIKE_BOOTSTRAP], ids=["the bootstrap", "the openDesk spike"]
+)
+def test_the_registration_validators_do_not_shell_out_to_grep(path: Path) -> None:
+    """grep is line based everywhere and its -z switch is GNU only (PR #26 on macOS), so a
+    multiline value has to be judged by the whole string match of bash itself."""
+    for name in REGISTRATION_VALIDATORS:
+        assert "grep" not in shell_function(name, path), f"{name} in {path.name} calls grep"
 
 
 def test_the_shared_key_is_validated_like_the_app_secret() -> None:
