@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-01)
 Phase: Milestone v1.7 complete (Phasen 25-29)
 Plan: keiner
 Status: Awaiting next milestone
-Last activity: 2026-10-01, Milestone v1.7 abgeschlossen und archiviert
+Last activity: 2026-10-19, Quick-Task 261019-ojn: Bootstrap-Validatoren newline-sicher (PR-26-Nachtest DaniW42)
 
 ## Performance Metrics
 
@@ -820,6 +820,7 @@ Items acknowledged and deferred at milestone close on 2026-10-01 (v1.7):
 
 | Date | Task | Commits | Directory |
 |------|------|---------|-----------|
+| 2026-10-19 | Bootstrap-Validatoren newline-sicher und BSD-grep-portabel: require_url_shape hing an GNU grep -z (macOS-Befund DaniW42 in PR #26, Mehrzeilenwert rutschte durch), require_port_number/require_registry_shape/require_hex64 prueften zeilenweise auf allen Plattformen; alle vier in beiden Bootstrap-Skripten auf bash-eigenes [[ =~ ]] umgestellt (bash-3.2-tauglich), 9 neue Testfaelle inkl. Spike-Skript und grep-Verbotstest, Modul 182 passed, Gates gruen. | bef1cba, a83d4cf (Merge 7282738) | .planning/quick/261019-ojn-bootstrap-validators-newline-safe-and-bs/ |
 | 2026-10-05 | Issue #15: Deploy-Variable NC_MCP_DISABLED_TOOLS schaltet ganze Werkzeugbündel ab (reg_*-Suffixe, z. B. mail,calendar); unbekannter Name oder alle aus = Startfehler; nur Registrierung geschaltet, keine Zugriffskontrolle; ExApp-Logzeile, info.xml-Deklaration (Variablen-Gate auf 11), README-Abschnitt, CHANGELOG Unreleased. 5444 passed. NUR LOKAL, kein Push, kein Release (0.5.0 gesammelt nach Owner-Entscheid). Antwortentwurf #15 im SUMMARY, nicht gepostet. | d7f0b28, cfacb5a, 2ab08a8 | .planning/quick/261005-95h-issue-15-tool-buendel-abschaltbar/ |
 | 2026-09-30 | WR-04: Kanarie- und Paarbeweise (GATE-02/03) in neuen CI-Job canary-nc35 auf nextcloud:35.0.1-apache verschoben (Compose-Variable NC_EXAPP_NEXTCLOUD_IMAGE, Default bleibt 34.0.3 für EXAPP-06, occ-status-Versionscheck, NC_MCP_REQUIRE_LIVE=1), zwei Wächtertests. Gates grün. Offen: erster CI-Lauf nach Owner-Push. | c358b40 | .planning/quick/260930-ty7-ci-kanarie-auf-nc-35/ |
 | 2026-09-26 | 24-REVIEW-Infos IN-01 bis IN-07 abgeraeumt: Bremszustand _windows aus eq/hash (compare=False), AST-Gate refusals.py importiert nichts aus oauth, actor-Auslassung im repr begruendet und getestet (R-24-04), exchange_check_routes nimmt die geladene Config, Spalten-Docstring korrigiert (neun zu elf), privacy.md nennt die reservierten --user-Woerter, --keep-armed-Hilfetext nennt die verbleibende Test-CA. Alle Gates gruen. | 017c30c, 1a024a2, 687e161, 4b5a7ed (Merge bc721b5) | .planning/quick/260926-ktw-24-review-infos-in-01-bis-in-07-abraeume/ |
