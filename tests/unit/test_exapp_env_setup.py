@@ -1229,7 +1229,9 @@ def test_the_topology_guard_refuses_a_foreign_compose_file(
         ("require_port_number NC_EXAPP_APP_PORT ''", 1),
         ("require_port_number NC_EXAPP_APP_PORT '23000 '", 1),
         ("require_port_number NC_EXAPP_APP_PORT '23000\n\"system\":true'", 1),
-        ("require_port_number NC_EXAPP_APP_PORT '23000\rX'", 1),
+        # ANSI-C quoting: bash itself expands \r, Git for Windows bash drops a raw CR byte
+        # from the script text before the validator could see it.
+        ("require_port_number NC_EXAPP_APP_PORT $'23000\\r'", 1),
         ("require_registry_shape '127.0.0.1:5000'", 0),
         ("require_registry_shape 'ghcr.io'", 0),
         ('require_registry_shape \'127.0.0.1:5000","image":"evil\'', 1),
@@ -1667,10 +1669,13 @@ def test_a_missing_env_file_still_generates_a_fresh_secret(tmp_path: Path) -> No
 def test_require_hex64_refuses_anything_but_one_hex_line(value: str, expected_code: int) -> None:
     """A line based match would accept two valid lines as one secret, and the second line
     would then travel into the environment file and the registration payload."""
+    # ANSI-C quoting lets bash expand \n and \r itself; Git for Windows bash drops a raw CR
+    # byte from the script text, which would turn the CR case into a plain secret.
+    quoted = "$'" + value.replace("\n", "\\n").replace("\r", "\\r") + "'"
     script = (
         "set -euo pipefail\n"
         f"{shell_function('require_hex64')}\n"
-        f"require_hex64 APP_SECRET '{value}' .env.exapp\n"
+        f"require_hex64 APP_SECRET {quoted} .env.exapp\n"
     )
 
     result = run_bash(script)

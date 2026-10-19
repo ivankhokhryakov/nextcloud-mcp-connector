@@ -923,7 +923,8 @@ app_password() {
 # client to HaRP with HP_SHARED_KEY (CR-02). A weak value is refused, never adopted.
 require_hex64() {
   local name="$1" value="$2" origin="$3"
-  if ! printf '%s' "$value" | grep -E '^[0-9a-f]{64}$' >/dev/null; then
+  local re='^[0-9a-f]{64}$'
+  if ! [[ "$value" =~ $re ]]; then
     echo "ERROR: ${name} in ${origin} is not 64 lower case hex characters." >&2
     echo "It looks like a placeholder or a hand written value, and both are secrets that" >&2
     echo "grant full access. Generate one: openssl rand -hex 32" >&2
@@ -937,9 +938,13 @@ require_hex64() {
 # COMPOSE_FILE against) produces at best invalid JSON, at worst a payload with extra
 # fields that AppAPI adopts silently. APP_SECRET is covered by require_hex64 (CR-02);
 # these two shapes are pinned here, immediately before any of them is used.
+# Every check below is the ERE match of bash itself against the whole value, so ^ and $
+# anchor at the edges of the string and an embedded LF or CR fails closed. grep would judge
+# each line on its own and let a second line ride along into the payload.
 require_port_number() {
   local name="$1" value="$2"
-  if ! printf '%s' "$value" | grep -E '^[0-9]+$' >/dev/null; then
+  local re='^[0-9]+$'
+  if ! [[ "$value" =~ $re ]]; then
     echo "ERROR: ${name} is '${value}', not a plain port number." >&2
     echo "It is interpolated unquoted into the registration JSON (IN-07). Refusing." >&2
     return 1
@@ -948,7 +953,8 @@ require_port_number() {
 
 require_registry_shape() {
   local value="$1"
-  if ! printf '%s' "$value" | grep -E '^[0-9A-Za-z_.:-]+$' >/dev/null; then
+  local re='^[0-9A-Za-z_.:-]+$'
+  if ! [[ "$value" =~ $re ]]; then
     echo "ERROR: NC_SPIKE_OD_REGISTRY is '${value}', which is not a host[:port] shape." >&2
     echo "It is interpolated into the registration JSON (IN-07). Refusing." >&2
     return 1
@@ -961,11 +967,15 @@ require_registry_shape() {
 # JSON at best and extra fields AppAPI adopts silently at worst, which is why it is pinned
 # here rather than trusted because a default built it. The value is not echoed back: it can
 # come from the environment, and the name is what the caller has to fix.
-# grep runs with -z so the pattern sees the whole value as one record. Without it a value
-# with a newline would pass on its first line and smuggle the rest into the payload.
+# The check is the ERE match of bash itself against the whole value, so ^ and $ anchor at
+# the edges of the string and a value with an embedded LF or CR fails closed instead of
+# passing on its first line and smuggling the rest into the payload. grep is line based and
+# its -z switch is GNU only, which let a two line address through on macOS (PR #26). The
+# pattern sits in a variable because bash 3.2 and bash 5 both read an unquoted $re as a regex.
 require_url_shape() {
   local name="$1" value="$2"
-  if ! printf '%s' "$value" | grep -Ez '^https?://[A-Za-z0-9._:-]+(/[A-Za-z0-9._/-]*)?$' >/dev/null; then
+  local re='^https?://[A-Za-z0-9._:-]+(/[A-Za-z0-9._/-]*)?$'
+  if ! [[ "$value" =~ $re ]]; then
     echo "ERROR: ${name} is not a plain http or https address." >&2
     echo "It is interpolated into the registration JSON (WR-03, IN-07). Refusing." >&2
     return 1
