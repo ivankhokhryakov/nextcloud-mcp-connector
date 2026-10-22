@@ -23,6 +23,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The conflict hint of a create-only upload says that uploads never overwrite,
   instead of claiming it for the whole server, which files_update made untrue.
 
+### Security
+
+- Dependencies with published advisories raised in the lock file: pillow
+  13.0.0 (used by the PPTX conversion), pypdf 6.21.2, opentelemetry-api
+  1.45.1 and certifi 2026.10.19. pip-audit over the shipped set is clean.
+
 ## [0.6.0] - 2026-10-18
 
 ### Added
