@@ -53,7 +53,13 @@ from .oauth.provider import NextcloudOAuthProvider, auth_routes
 from .oauth.registry import client_policy
 from .oauth.store import store_opener
 from .oauth.verifier import StoreTokenVerifier
-from .server import bundle_names, mcp
+
+# ``.server`` is deliberately not imported here (issue #31). Importing it registers every
+# tool, and ``files_update`` registers only when ``config.files_update_enabled`` answers
+# True at that moment. At module level that moment is before ``main`` has resolved the
+# administration settings, so the switch an administrator set in Nextcloud never reached
+# the registry. The import lives in :func:`build_exapp_app`, which ``main`` calls after the
+# resolved value has been written into the process environment.
 
 __all__ = ["build_exapp_app", "main"]
 
@@ -91,6 +97,9 @@ def build_exapp_app(env: Mapping[str, str] | None = None) -> Starlette:
     this mode the wrapper is not optional, so a missing wrap is an error and not a
     warning: it would leave the whole JSON-RPC preamble unauthenticated (CR-01).
     """
+    # Imported here and not at module level (issue #31, see the note below the imports).
+    from .server import bundle_names, mcp
+
     # One line either way, because the deploy daemon drops an undeclared variable without a
     # word (issue #12): the log is where an administrator sees which binding took effect.
     root = config.files_root(env)
@@ -549,8 +558,9 @@ def _resolved_env() -> tuple[dict[str, str], frozenset[str]]:
     to read over. A failure of the read is an empty overlay, so the deploy environment of an
     existing installation keeps working exactly as it did (T-05-20).
 
-    One key of the result travels further than this mapping, and :func:`main` says why: the
-    switch of TALK-04 is read by a tool, and a tool never sees this mapping.
+    Two keys of the result travel further than this mapping, and :func:`main` says why: the
+    switch of TALK-04 is read by a tool and the switch of files_update by the registration of
+    the tools (issue #31), and neither ever sees this mapping.
     """
     env = dict(os.environ)
     if not config.exapp_configured(env):
@@ -637,16 +647,27 @@ def main() -> None:
     # `os.environ` is not module state in the sense of D-20: it is the environment of this
     # process and not a dictionary of one of our modules, which is why
     # tests/contract/test_no_destructive_calls.py::ALLOWED_MODULE_STATE stays untouched at
-    # its two entries. Exactly one key travels, never the whole overlay, so this exception
-    # cannot grow by habit. The price is the known one: a changed value takes effect after
-    # this app has been disabled and enabled once, the same price the five other values pay,
-    # and it is named in the description of the form field, in docs/oauth-setup.md and in
-    # the refusal sentence of the tool. The alternative, reading the value out of Nextcloud
+    # its two entries. Named keys travel one by one, never the whole overlay, so this
+    # exception cannot grow by habit; the second one (issue #31) follows below. The price is
+    # the known one: a changed value takes effect after this app has been disabled and
+    # enabled once, the same price the five other values pay, and it is named in the
+    # description of the form field, in docs/oauth-setup.md and in the refusal sentence of
+    # the tool. The alternative, reading the value out of Nextcloud
     # per send, is refused: one more round trip per message, a second failure mode, and the
     # answer to a failed read would have to be fail closed, which contradicts "on by
     # default" on every network hiccup.
     if config.ENV_TALK_SEND in resolved:
         os.environ[config.ENV_TALK_SEND] = resolved[config.ENV_TALK_SEND]
+
+    # The second key that travels, for a different reader (issue #31). The switch of
+    # files_update is read once, when ``.server`` registers its tools, and that registration
+    # reads the process environment because a tool bundle has no resolved mapping either.
+    # Without this line the deploy variable decided alone: a box ticked in Nextcloud left the
+    # tool missing, and a box unticked there left an opt-in write tool armed. The write has to
+    # come before :func:`build_exapp_app`, which is where ``.server`` is first imported. The
+    # price is the same activation cycle the other values pay.
+    if config.ENV_FILES_UPDATE in resolved:
+        os.environ[config.ENV_FILES_UPDATE] = resolved[config.ENV_FILES_UPDATE]
 
     try:
         config.exapp_settings(resolved)
