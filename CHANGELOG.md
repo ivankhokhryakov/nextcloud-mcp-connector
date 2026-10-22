@@ -11,8 +11,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-22
+
 ### Fixed
 
+- In the ExApp, the "Allow editing existing text files" admin setting now
+  decides whether `files_update` is offered. Before, only the deploy variable
+  `NC_MCP_FILES_UPDATE` did: a ticked box left the tool missing, and an
+  unticked box left it on when the variable said on. Disable and enable the
+  app once after changing the setting. Thanks to @cms-77 (#31).
 - The conflict hint of a create-only upload says that uploads never overwrite,
   instead of claiming it for the whole server, which files_update made untrue.
 
@@ -1000,7 +1007,8 @@ First release, submitted to the Nextcloud App Store.
   never sees more than that user sees in the web interface.
 - A privacy and data flow description, see [docs/privacy.md](docs/privacy.md).
 
-[Unreleased]: https://github.com/street1983nk/nextcloud-mcp-connector/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/street1983nk/nextcloud-mcp-connector/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/street1983nk/nextcloud-mcp-connector/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/street1983nk/nextcloud-mcp-connector/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/street1983nk/nextcloud-mcp-connector/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/street1983nk/nextcloud-mcp-connector/compare/v0.4.0...v0.5.0
