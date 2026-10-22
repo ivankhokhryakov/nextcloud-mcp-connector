@@ -11,6 +11,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-10-22
+
+### Fixed
+
+- Saving the admin settings works again on Nextcloud 34.0.3 and later. The
+  settings page sends the form id without the app prefix, so
+  `mcp_connector_admin` arrived as `admin`, matched no form, and nothing was
+  stored although the page reported success. The form now has the id
+  `admin_values`; the old registration is removed on enable, and values
+  saved before are kept. Thanks to @cms-77 (#34).
+- After an update, the stored admin settings are in force again. The new
+  container starts while the app is still disabled, so it could not read
+  them and ran with the deploy environment, including OAuth and audit
+  switches, until the next disable and enable. The enable that follows an
+  update now reads them again and restarts the app once when they differ.
+  Thanks to @cms-77 (#33).
+
 ## [0.6.1] - 2026-10-22
 
 ### Fixed
@@ -1013,7 +1030,8 @@ First release, submitted to the Nextcloud App Store.
   never sees more than that user sees in the web interface.
 - A privacy and data flow description, see [docs/privacy.md](docs/privacy.md).
 
-[Unreleased]: https://github.com/street1983nk/nextcloud-mcp-connector/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/street1983nk/nextcloud-mcp-connector/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/street1983nk/nextcloud-mcp-connector/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/street1983nk/nextcloud-mcp-connector/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/street1983nk/nextcloud-mcp-connector/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/street1983nk/nextcloud-mcp-connector/compare/v0.5.0...v0.5.1
