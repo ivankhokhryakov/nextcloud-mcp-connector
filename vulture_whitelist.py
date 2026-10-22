@@ -333,3 +333,8 @@ _._decode_payload
 # (plan 27-03), talk.file_screen and the talk list answers call paths_of_fileids and
 # degraded_entry as well (plan 27-05), and unavailable_error is raised by fetch(file) (plan
 # 27-03) and by talk.one_room for a file conversation (plan 27-05).
+
+# --- Issue #33 ------------------------------------------------------------------------
+# Starlette reads Response.background after the answer is sent; the enable hook sets it so
+# the restart runs only once AppAPI has its answer (exapp/lifecycle.py).
+background

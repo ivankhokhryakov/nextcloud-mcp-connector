@@ -341,6 +341,17 @@ FILES_WITH_OWN_CONFIG = frozenset({"oauth/crypto.py"})
 #: the other.
 CONFIG_DELETE_FORM = '"DELETE",'
 
+# The fourth file (issue #34): the enable hook removes the admin form registration this app
+# made under its id up to 0.6.1 (``exapp/admin_settings.py::retire_legacy_admin_form``,
+# DELETE on ``ui/settings``, whose POST half lives in the same module). What goes is a
+# registration this app wrote about itself in the AppAPI control plane; the values an
+# administrator saved are keyed on the field id and stay. The same one exact call form as
+# the two exemptions above, so any other DELETE in that module is still reported.
+FILES_WITH_OWN_FORM = frozenset({"exapp/admin_settings.py"})
+
+#: Written out a fourth time for the reason given at :data:`CONFIG_DELETE_FORM`.
+FORM_DELETE_FORM = '"DELETE",'
+
 # Module level mutable state is forbidden as a rule, because a dictionary that outlives a
 # request is one refactor away from being a session store, and a session store is what
 # breaks the restart proof (D-20). These three are the documented exceptions: all are pure
@@ -417,6 +428,8 @@ def _violations(relative: str, lines: Iterable[tuple[int, str]]) -> list[str]:
             if needle == "DELETE" and _is_own_app_password(relative, text):
                 continue
             if needle == "DELETE" and _is_own_config_value(relative, text):
+                continue
+            if needle == "DELETE" and _is_own_form_registration(relative, text):
                 continue
             if needle in TABLES_READ_NEEDLES and _is_a_tables_read(relative, text):
                 continue
@@ -605,6 +618,11 @@ def _is_own_config_value(relative: str, text: str) -> bool:
     return relative in FILES_WITH_OWN_CONFIG and text.strip() == CONFIG_DELETE_FORM
 
 
+def _is_own_form_registration(relative: str, text: str) -> bool:
+    """True for the one call that removes this app's old admin form registration (#34)."""
+    return relative in FILES_WITH_OWN_FORM and text.strip() == FORM_DELETE_FORM
+
+
 def _is_a_tables_read(relative: str, text: str) -> bool:
     """True for the two Tables reads below a named segment, false for anything else."""
     return relative in FILES_WITH_THE_TABLES_READS and any(
@@ -654,7 +672,12 @@ def test_the_sql_exemption_covers_sql_and_nothing_else() -> None:
     assert not _is_own_sql(store, 'await client.request("DELETE", url)')
     assert not _is_own_sql("tools/files.py", 'conn.execute("DELETE FROM flows")')
 
-    for relative in FILES_WITH_OWN_SQL | FILES_WITH_OWN_APP_PASSWORD | FILES_WITH_OWN_CONFIG:
+    for relative in (
+        FILES_WITH_OWN_SQL
+        | FILES_WITH_OWN_APP_PASSWORD
+        | FILES_WITH_OWN_CONFIG
+        | FILES_WITH_OWN_FORM
+    ):
         assert (SRC / relative).is_file(), f"{relative} is exempt but does not exist"
 
 
@@ -687,6 +710,16 @@ def test_the_config_exemption_covers_one_call_form_and_nothing_else() -> None:
     assert not _is_own_config_value(crypto, '            "DELETE", files_url,')
     assert not _is_own_config_value("tools/files.py", '            "DELETE",')
     assert not _is_own_config_value(crypto, 'conn.execute("DELETE FROM flows")')
+
+
+def test_the_form_exemption_covers_one_call_form_and_nothing_else() -> None:
+    """Counter proof for the fourth exemption: only the removal of our own old form (#34)."""
+    admin = "exapp/admin_settings.py"
+    assert _is_own_form_registration(admin, '            "DELETE",')
+    assert not _is_own_form_registration(admin, 'await client.request("DELETE", files_url)')
+    assert not _is_own_form_registration(admin, '            "DELETE", files_url,')
+    assert not _is_own_form_registration(admin, "await client.delete(url)")
+    assert not _is_own_form_registration("tools/files.py", '            "DELETE",')
 
 
 @pytest.mark.parametrize(("needle", "line"), sorted(TABLES_ROUTES.items()))

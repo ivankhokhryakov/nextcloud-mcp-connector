@@ -22,14 +22,17 @@ Three rules that come straight from the AppAPI source:
 """
 
 import logging
-from collections.abc import Mapping
+import os
+import signal
+from collections.abc import Callable, Mapping
 
+from starlette.background import BackgroundTask
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
 from ..errors import ToolError
-from . import admin_settings, occ, settings_form, status
+from . import admin_settings, config_values, occ, settings_form, status
 from .auth import AppApiRejected, require_appapi
 from .responses import NO_STORE, json_response
 
@@ -47,11 +50,42 @@ HEADER_ORIGIN_IP = "x-origin-ip"
 logger = logging.getLogger("mcp_connector.exapp.lifecycle")
 
 
-def lifecycle_routes(env: Mapping[str, str] | None = None) -> list[Route]:
+def _restart_this_process() -> None:
+    """Ask the server of this process to stop, so the container starts once more.
+
+    uvicorn handles SIGTERM with a graceful shutdown, the process is PID 1 of the container
+    (``start.sh`` ends in ``exec``), and AppAPI creates ExApp containers with the restart
+    policy ``unless-stopped`` unless an administrator changed ``container_restart_policy``.
+    """
+    signal.raise_signal(signal.SIGTERM)
+
+
+async def _stored_values_differ(env: Mapping[str, str] | None) -> bool:
+    """Whether the stored admin values are not the ones this process serves with (#33).
+
+    ``occ app_api:app:update`` disables the app, deploys the new container and enables the
+    app only after ``/init``. The new container therefore reads its admin values while the
+    app is still disabled, AppAPI answers that read with 401, and the deploy environment is
+    what the process was built with. ``enableExAppInternal`` sets the app to enabled before it
+    calls ``/enabled``, so the same read succeeds here, and a difference means the start
+    missed what the administrator stored. A failed read here is no difference: it logs its
+    own line and changes nothing, exactly as at the start.
+    """
+    overlay, _ = await config_values.admin_values(env=env)
+    in_force = os.environ if env is None else env
+    return any(in_force.get(name) != value for name, value in overlay.items())
+
+
+def lifecycle_routes(
+    env: Mapping[str, str] | None = None,
+    restart: Callable[[], None] = _restart_this_process,
+) -> list[Route]:
     """Build the three AppAPI routes against one environment.
 
     The environment is a parameter for the same reason ``entry_http.build_app`` takes one:
     it lets every test build its own application without touching the process environment.
+    ``restart`` is a parameter for the same reason: a test records the call instead of
+    stopping its own interpreter.
     """
 
     async def heartbeat(request: Request) -> Response:
@@ -101,6 +135,10 @@ def lifecycle_routes(env: Mapping[str, str] | None = None) -> list[Route]:
                 # configured either.
                 logger.error("the admin form registration failed, the admin settings are missing")
             try:
+                await admin_settings.retire_legacy_admin_form(env=env)
+            except Exception:
+                logger.error("the removal of the old admin form failed, it may show twice")
+            try:
                 await occ.register_occ_commands(env=env)
             except Exception:
                 # The third independent registration, in its own try for the same reason the
@@ -117,6 +155,24 @@ def lifecycle_routes(env: Mapping[str, str] | None = None) -> list[Route]:
                     "the occ command registration failed, the purge and the audit log check "
                     "are missing"
                 )
+            # Last, after every registration, and answered before the restart: AppAPI only
+            # learns that the enable worked from this answer, and the restart runs as a
+            # background task once it is sent (issue #33).
+            try:
+                differ = await _stored_values_differ(env)
+            except Exception:
+                logger.error("the admin values could not be compared on enable")
+                differ = False
+            if differ:
+                logger.warning(
+                    "the administration settings of this app differ from the values this "
+                    "process started with, which happens when the start ran while the app "
+                    "was still disabled, as during an update. The process stops now so the "
+                    "container starts again and reads them."
+                )
+                response = json_response({"error": ""})
+                response.background = BackgroundTask(restart)
+                return response
         # enabled=0 registers nothing, unregisters nothing and above all destroys nothing.
         # AppAPI hands out the forms of enabled apps only, so a disabled app disappears from
         # the settings page by itself, and an uninstall is cleaned up on AppAPI's side

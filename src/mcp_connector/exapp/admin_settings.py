@@ -51,11 +51,31 @@ from .settings_form import SETTINGS_PATH
 from .ui import strings
 from .ui.connections import CONNECTIONS_PATH
 
-__all__ = ["ADMIN_FORM_ID", "PUBLIC_DOCS_URL", "form_scheme", "register_admin_form"]
+__all__ = [
+    "ADMIN_FORM_ID",
+    "LEGACY_ADMIN_FORM_ID",
+    "PUBLIC_DOCS_URL",
+    "form_scheme",
+    "register_admin_form",
+    "retire_legacy_admin_form",
+]
 
 #: The second form id of this app. ``insertOrUpdate`` keys on (appid, formid), so this one
 #: never collides with the personal signpost and re-enabling updates it in place.
-ADMIN_FORM_ID = "mcp_connector_admin"
+#:
+#: It must not contain ``<app id>_`` (issue #34). The settings frontend of Nextcloud sends
+#: ``formId: form.id.replace(formApp + "_", "")`` when a value is saved (stable34 and later,
+#: ``DeclarativeSection.vue``), and AppAPI's ``SetValueListener`` then looks the form up by
+#: that id exactly. ``mcp_connector_admin`` arrived as ``admin``, matched no form, and the
+#: listener returned without storing anything while the request still answered 200. An id
+#: without the prefix survives the replace unchanged.
+ADMIN_FORM_ID = "admin_values"
+
+#: The id this form carried up to 0.6.1. AppAPI keeps a registration until it is deleted,
+#: so the old entry is removed on enable, or the page would show the form twice. The stored
+#: values are keyed on the field id alone (``setAppConfigValue($app, $fieldId, ...)``), so
+#: nothing an administrator saved is lost with the old id.
+LEGACY_ADMIN_FORM_ID = "mcp_connector_admin"
 
 #: What makes this an administration form, and what makes AppAPI store its values in the
 #: ExApp configuration rather than in the preferences of one user.
@@ -237,3 +257,52 @@ async def register_admin_form(*, env: Mapping[str, str] | None = None) -> None:
 
     if response.status_code // 100 != 2:
         logger.error("the admin form registration to %s answered %s", url, response.status_code)
+
+
+async def retire_legacy_admin_form(*, env: Mapping[str, str] | None = None) -> None:
+    """Remove the registration of the form id up to 0.6.1 (issue #34). Never raises.
+
+    ``DELETE /ocs/v2.php/apps/app_api/api/v1/ui/settings?formId=...`` in the app context
+    (``OCSSettingsController::unregisterForm``, app_api v34.0.0). A 404 is the normal answer
+    on every enable after the first one, because the entry is already gone, and it is not
+    logged. Every other failure costs one log line and a second, dead form on the settings
+    page, never the enable.
+    """
+    try:
+        settings = config.exapp_settings(env)
+    except ToolError:
+        logger.error("the old admin form was not removed: the deploy environment is incomplete")
+        return
+
+    url = f"{settings.base_url}{SETTINGS_PATH}"
+    headers = dict(OCS_HEADERS)
+    headers.update(
+        appapi_auth_headers(
+            "",
+            app_id=settings.app_id,
+            app_version=settings.app_version,
+            aa_version=settings.aa_version,
+            app_secret=settings.app_secret,
+        )
+    )
+
+    client = shared_client()
+    try:
+        response = await client.request(
+            "DELETE",
+            url,
+            params={"formId": LEGACY_ADMIN_FORM_ID},
+            headers=headers,
+        )
+    except httpx.HTTPError:
+        logger.error("the removal of the old admin form at %s did not reach Nextcloud", url)
+        return
+
+    if response.status_code == httpx.codes.NOT_FOUND:
+        return
+    if response.status_code // 100 != 2:
+        logger.error(
+            "the removal of the old admin form at %s answered %s", url, response.status_code
+        )
+        return
+    logger.info("the admin form of 0.6.1 and earlier was replaced by the current one")

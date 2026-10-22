@@ -22,7 +22,9 @@ from starlette.testclient import TestClient
 
 from mcp_connector import config
 from mcp_connector.exapp import (
+    admin_settings,
     audit_read,
+    config_values,
     exchange_check,
     exclusion_check,
     lifecycle,
@@ -31,6 +33,7 @@ from mcp_connector.exapp import (
     status,
 )
 from mcp_connector.exapp.ui import strings
+from mcp_connector.oauth import registry
 
 APP_ID = "mcp_connector"
 APP_SECRET = "app-secret-test"
@@ -676,3 +679,118 @@ async def test_every_command_failing_is_one_log_line_each_and_no_exception(
         occ.OCC_AUDIT_READ_COMMAND_NAME,
     ):
         assert any(name in line for line in errors), f"no line names {name}"
+
+
+# --- issue #33: an update starts while the app is still disabled --------------------
+
+
+@pytest.fixture
+def quiet_enable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every registration of the enable hook answered locally, so only the comparison runs."""
+
+    async def nothing(*, env: object = None) -> None:
+        del env
+
+    monkeypatch.setattr(settings_form, "register_settings_form", nothing)
+    monkeypatch.setattr(admin_settings, "register_admin_form", nothing)
+    monkeypatch.setattr(admin_settings, "retire_legacy_admin_form", nothing)
+    monkeypatch.setattr(occ, "register_occ_commands", nothing)
+
+
+def stored(monkeypatch: pytest.MonkeyPatch, overlay: dict[str, str]) -> None:
+    """What the read of the admin values answers on enable."""
+
+    async def read(*, env: object = None, client: object = None) -> config_values.AdminValues:
+        del env, client
+        return config_values.AdminValues(overlay=dict(overlay), refused=frozenset())
+
+    monkeypatch.setattr(config_values, "admin_values", read)
+
+
+def enable(env: dict[str, str]) -> tuple[int, object, list[str]]:
+    """One enable call against a process built with ``env``: status, body and restarts."""
+    restarts: list[str] = []
+    app = Starlette(routes=lifecycle.lifecycle_routes(env, restart=lambda: restarts.append("x")))
+    with TestClient(app) as http:
+        response = http.put("/enabled?enabled=1", headers=appapi_headers())
+    return response.status_code, response.json(), restarts
+
+
+@pytest.mark.usefixtures("quiet_enable")
+def test_an_update_start_with_stored_values_restarts_once_after_answering(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The report of #33: the start used the deploy value, the stored one says otherwise.
+
+    The answer is the usual empty error field, because AppAPI disables the app again on any
+    other answer, and the restart runs once that answer is sent.
+    """
+    stored(monkeypatch, {config.ENV_FILES_UPDATE: config_values.SWITCH_ON})
+
+    status, body, restarts = enable({**ENV, config.ENV_FILES_UPDATE: "off"})
+
+    assert status == 200
+    assert body == {"error": ""}
+    assert restarts == ["x"]
+
+
+@pytest.mark.usefixtures("quiet_enable")
+def test_a_stored_security_switch_that_the_start_missed_restarts_as_well(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The direction #33 asked about: a door the administrator closed stays closed."""
+    stored(monkeypatch, {registry.ENV_DCR: config_values.SWITCH_OFF})
+
+    _, _, restarts = enable(dict(ENV))
+
+    assert restarts == ["x"]
+
+
+@pytest.mark.usefixtures("quiet_enable")
+def test_a_start_that_read_the_stored_values_is_not_restarted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every ordinary enable: the container started after the app was enabled."""
+    stored(monkeypatch, {config.ENV_FILES_UPDATE: config_values.SWITCH_ON})
+
+    _, body, restarts = enable({**ENV, config.ENV_FILES_UPDATE: config_values.SWITCH_ON})
+
+    assert body == {"error": ""}
+    assert restarts == []
+
+
+@pytest.mark.usefixtures("quiet_enable")
+def test_nothing_stored_is_never_a_restart(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The first installation: there is no value yet, so there is nothing to miss."""
+    stored(monkeypatch, {})
+
+    _, _, restarts = enable(dict(ENV))
+
+    assert restarts == []
+
+
+@pytest.mark.usefixtures("quiet_enable")
+def test_a_failing_comparison_never_costs_the_enable(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def boom(*, env: object = None, client: object = None) -> config_values.AdminValues:
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(config_values, "admin_values", boom)
+
+    status, body, restarts = enable(dict(ENV))
+
+    assert status == 200
+    assert body == {"error": ""}
+    assert restarts == []
+
+
+@pytest.mark.usefixtures("quiet_enable")
+def test_a_disable_never_compares_and_never_restarts(monkeypatch: pytest.MonkeyPatch) -> None:
+    stored(monkeypatch, {config.ENV_FILES_UPDATE: config_values.SWITCH_ON})
+    restarts: list[str] = []
+    app = Starlette(routes=lifecycle.lifecycle_routes(ENV, restart=lambda: restarts.append("x")))
+
+    with TestClient(app) as http:
+        response = http.put("/enabled?enabled=0", headers=appapi_headers())
+
+    assert response.json() == {"error": ""}
+    assert restarts == []
