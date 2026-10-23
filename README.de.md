@@ -25,7 +25,7 @@ Das Modell bringen Sie mit, und kein Inhalt verlässt Ihren Server.
 
 ## Was er kann
 
-- 22 Tools über neun App-Familien: Dateien, Kalender, Notizen, Deck, Kontakte, Tables, Talk,
+- 23 Tools über neun App-Familien: Dateien, Kalender, Notizen, Deck, Kontakte, Tables, Talk,
   Mail und die cloud-weite Suche
 - OAuth 2.1 nach der MCP-Autorisierungsspezifikation: dynamische Client-Registrierung,
   PKCE S256, zielgebundene Token, Refresh-Rotation mit Wiederverwendungserkennung und

@@ -25,7 +25,7 @@ Le modèle, c'est vous qui l'apportez, et aucun contenu ne quitte votre serveur.
 
 ## Ce qu'il sait faire
 
-- 22 outils répartis sur neuf familles d'applications : fichiers, agenda, notes, Deck,
+- 23 outils répartis sur neuf familles d'applications : fichiers, agenda, notes, Deck,
   contacts, Tables, Talk, Mail et la recherche à l'échelle du cloud
 - OAuth 2.1 conforme à la spécification d'autorisation MCP : enregistrement dynamique des
   clients, PKCE S256, jetons liés à leur audience, rotation des jetons de rafraîchissement
