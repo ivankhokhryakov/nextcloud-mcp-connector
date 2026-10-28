@@ -194,7 +194,7 @@ upload ID. Existing completed files are unaffected.
 
 ChatGPT file attachments can be passed as an optional `file` parameter to
 `files_upload` (advertised through `_meta["openai/fileParams"]`). Source URLs are
-restricted to trusted OpenAI/ChatGPT domains and the observed signed Azure Blob
+restricted to `*.oaiusercontent.com` and the observed signed Azure Blob
 account `oaisdmntprdenmarkeast.blob.core.windows.net`; other tenants and redirects
 are refused. Downloaded bytes are checked in a size-bounded temporary file (never
 buffered as a complete blob in RAM) **before** the create-only WebDAV PUT begins.

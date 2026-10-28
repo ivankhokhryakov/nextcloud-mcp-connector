@@ -665,8 +665,7 @@ def _openai_download_url(value: str) -> str:
         port = None
     host = (parsed.hostname or "").lower() if parsed is not None else ""
     trusted_host = host in _OPENAI_AZURE_HOSTS or any(
-        host == suffix or host.endswith(f".{suffix}")
-        for suffix in _OPENAI_FILE_HOST_SUFFIXES
+        host == suffix or host.endswith(f".{suffix}") for suffix in _OPENAI_FILE_HOST_SUFFIXES
     )
     if (
         parsed is None
@@ -759,16 +758,13 @@ async def _stage_attachment(
                     if source.status_code != 200:
                         raise ToolError(
                             message=(
-                                f"The attachment download failed with HTTP "
-                                f"{source.status_code}."
+                                f"The attachment download failed with HTTP {source.status_code}."
                             ),
                             hint="Retry the original attachment.",
                         )
                     raw_length = source.headers.get("Content-Length", "").strip()
                     content_length = (
-                        int(raw_length)
-                        if raw_length.isascii() and raw_length.isdigit()
-                        else None
+                        int(raw_length) if raw_length.isascii() and raw_length.isdigit() else None
                     )
                     if content_length is not None and content_length > MAX_ATTACHMENT_BYTES:
                         raise ToolError(

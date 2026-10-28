@@ -507,9 +507,7 @@ async def test_chatgpt_attachment_accepts_documented_chatgpt_domains(
                 headers={"Content-Length": str(len(payload))},
             )
         )
-        put = mock.route(method="PUT", url=TARGET_URL).mock(
-            return_value=httpx.Response(201)
-        )
+        put = mock.route(method="PUT", url=TARGET_URL).mock(return_value=httpx.Response(201))
         result = await files_tools.upload_attachment(
             clients,
             path=TARGET,
@@ -548,9 +546,7 @@ async def test_attachment_source_stream_error_never_starts_put(
 
     with respx.mock(assert_all_called=True) as mock:
         source = mock.get(OPENAI_FILE_URL).mock(
-            return_value=httpx.Response(
-                200, stream=Parts(), headers={"Content-Length": declared}
-            )
+            return_value=httpx.Response(200, stream=Parts(), headers={"Content-Length": declared})
         )
         with pytest.raises(ToolError, match=expected):
             await files_tools.upload_attachment(
@@ -558,6 +554,7 @@ async def test_attachment_source_stream_error_never_starts_put(
             )
         assert source.call_count == 1
         assert [call.request.method for call in mock.calls] == ["GET"]
+
 
 @pytest.mark.anyio
 async def test_attachment_staging_is_serialized(
@@ -599,4 +596,3 @@ async def test_attachment_staging_is_serialized(
         release.set()
     await asyncio.gather(first, second)
     assert calls == 2
-
