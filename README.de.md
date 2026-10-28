@@ -25,7 +25,7 @@ Das Modell bringen Sie mit, und kein Inhalt verlässt Ihren Server.
 
 ## Was er kann
 
-- 22 Tools über neun App-Familien: Dateien, Kalender, Notizen, Deck, Kontakte, Tables, Talk,
+- 23 Tools über neun App-Familien: Dateien, Kalender, Notizen, Deck, Kontakte, Tables, Talk,
   Mail und die cloud-weite Suche
 - OAuth 2.1 nach der MCP-Autorisierungsspezifikation: dynamische Client-Registrierung,
   PKCE S256, zielgebundene Token, Refresh-Rotation mit Wiederverwendungserkennung und
@@ -47,9 +47,12 @@ Das Modell bringen Sie mit, und kein Inhalt verlässt Ihren Server.
 
 - Nichts löschen: kein Tool setzt ein DELETE auf Dateien, Termine, Notizen, Karten oder
   Kontakte ab
-- Nichts überschreiben: Schreiben legt nur neu an, und `files_upload` lehnt einen vorhandenen
-  Pfad mit klarem Fehler ab, statt ihn zu ersetzen; Binärdateien werden in Base64-Blöcken
-  beliebiger Gesamtgröße hochgeladen
+- Kein bedingungsloses Überschreiben: Schreiben legt nur neu an, und `files_upload` lehnt einen
+  vorhandenen Pfad mit klarem Fehler ab, statt ihn zu ersetzen; Binärdateien werden in
+  Base64-Blöcken beliebiger Gesamtgröße hochgeladen. Aktiviert ein Administrator
+  `NC_MCP_FILES_UPDATE`, ersetzt `files_update` eine bestehende UTF-8-Textdatei nur dann, wenn
+  ihr ETag dem zuvor gelesenen Wert entspricht; geänderte oder gelöschte Dateien werden
+  abgelehnt, und der Versionsverlauf hängt vom Speicher-Backend ab
 - Kein Verschieben, kein Umbenennen, keine Änderung von Freigaben oder Berechtigungen
 - Mail ist strikt lesend: kein Senden, kein Entwurf, kein Verschieben, kein Markieren, kein
   Löschen, kein Anhang-Download

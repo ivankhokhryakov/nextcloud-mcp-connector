@@ -36,9 +36,9 @@
 	  - summary of the instance language alone. That is why the German and the French line
 	  - carry the words too instead of leaning on the English one.
 	  -->
-	<summary>MCP server for Nextcloud: connect Claude, ChatGPT, n8n and other AI assistants and agents over the Model Context Protocol.</summary>
-	<summary lang="de">MCP Server für Nextcloud: verbindet Claude, ChatGPT, n8n und andere KI-Assistenten und Agenten über das Model Context Protocol.</summary>
-	<summary lang="fr">Serveur MCP pour Nextcloud : connecte Claude, ChatGPT, n8n et d'autres assistants et agents IA via le Model Context Protocol.</summary>
+	<summary>MCP server for Nextcloud: Claude, ChatGPT, n8n and other AI assistants read, search, create and edit, as the signed-in user.</summary>
+	<summary lang="de">MCP Server für Nextcloud: Claude, ChatGPT, n8n und andere KI-Assistenten lesen, suchen und bearbeiten als angemeldeter Nutzer.</summary>
+	<summary lang="fr">Serveur MCP pour Nextcloud : Claude, ChatGPT, n8n et autres assistants IA lisent, cherchent et modifient, comme l'utilisateur.</summary>
 	<!--
 	  - The three descriptions are written on the smaller common denominator of the two
 	  - pipelines that render them, and the paragraphs are separated by blank lines on
@@ -67,6 +67,7 @@
 - Connects MCP assistants (Claude, ChatGPT, n8n, your own agent) to Nextcloud; every request runs as the signed-in user (OAuth sign-in; a per-account switch pauses access, one click can disconnect an assistant)
 - Tools: files (Office and PDF read as Markdown), calendar, notes, Deck, contacts, Tables, Talk, mail (read only) and one search across all of it
 - Nothing destructive: no delete, no move, no share; nothing in the background, no telemetry
+- New in 0.6.0: edit existing text files, off by default; the admin enables it, and a file is only replaced when it has not changed in the meantime
 - Files and folders with the collaborative tag kein-ki stay invisible to every assistant; occ mcp_connector:exclusion:check shows whether the tag is set up correctly
 
 Together with [Findling](https://apps.nextcloud.com/apps/findling), search hits include the contents of your documents, scans included, with exactly the rights of the asking user.
@@ -85,6 +86,7 @@ Requirements:
 - Verbindet MCP-Assistenten (Claude, ChatGPT, n8n, eigene Agenten) mit Nextcloud; jede Anfrage läuft als der angemeldete Nutzer (OAuth-Anmeldung; ein Schalter je Konto pausiert den Zugriff, ein Klick kann einen Assistenten trennen)
 - Werkzeuge: Dateien (Office und PDF als Markdown lesbar), Kalender, Notizen, Deck, Kontakte, Tables, Talk, Mail (nur lesen) und eine Suche über alles
 - Nichts Destruktives: kein Löschen, kein Verschieben, kein Teilen; nichts im Hintergrund, keine Telemetrie
+- Neu in 0.6.0: bestehende Textdateien bearbeiten, ab Werk aus; der Admin schaltet es frei, und eine Datei wird nur ersetzt, wenn sie sich zwischenzeitlich nicht geändert hat
 - Dateien und Ordner mit dem kollaborativen Tag kein-ki bleiben für jeden Assistenten unsichtbar; occ mcp_connector:exclusion:check zeigt, ob das Tag richtig eingerichtet ist
 
 Zusammen mit [Findling](https://apps.nextcloud.com/apps/findling) enthalten Suchtreffer die Inhalte Ihrer Dokumente, auch aus Scans, mit genau den Rechten des fragenden Nutzers.
@@ -103,6 +105,7 @@ Anforderungen:
 - Connecte les assistants MCP (Claude, ChatGPT, n8n, vos propres agents) à Nextcloud ; chaque requête s'exécute comme l'utilisateur connecté (connexion OAuth ; un interrupteur par compte suspend l'accès, un clic peut déconnecter un assistant)
 - Outils : fichiers (Office et PDF lus en Markdown), calendrier, notes, Deck, contacts, Tables, Talk, mail (lecture seule) et une recherche sur tout
 - Rien de destructif : pas de suppression, pas de déplacement, pas de partage ; rien en arrière-plan, pas de télémétrie
+- Nouveau en 0.6.0 : modifier des fichiers texte existants, désactivé par défaut ; l'administrateur l'active, et un fichier n'est remplacé que s'il n'a pas changé entre-temps
 - Les fichiers et dossiers portant l'étiquette collaborative kein-ki restent invisibles pour tout assistant ; occ mcp_connector:exclusion:check indique si l'étiquette est correctement configurée
 
 Avec [Findling](https://apps.nextcloud.com/apps/findling), les résultats de recherche incluent le contenu de vos documents, numérisations comprises, avec exactement les droits de l'utilisateur qui demande.
@@ -116,7 +119,7 @@ Prérequis :
 - Nextcloud 32 à 35 avec l'application AppAPI ; fonctionne comme External App
 - Ou sans AppAPI, depuis la 0.2.0 : exploité à côté de votre Nextcloud, le consentement étant confirmé par votre connexion OIDC ; guide : docs/standalone-oauth.md dans le code source
 - n8n parle MCP nativement depuis la 1.119.0 ; guide : docs/n8n-setup.md dans le code source]]></description>
-	<version>0.5.1</version>
+	<version>0.6.2</version>
 	<licence>AGPL-3.0-or-later</licence>
 	<author mail="admin@infranode.dev">street1983nk</author>
 	<namespace>McpConnector</namespace>
@@ -196,7 +199,7 @@ Prérequis :
 			-->
 			<registry>ghcr.io</registry>
 			<image>street1983nk/mcp_connector</image>
-			<image-tag>0.5.1</image-tag>
+			<image-tag>0.6.2</image-tag>
 		</docker-install>
 		<!--
 		  - Exactly thirteen routes, and they are the whole external attack surface of this app.
@@ -550,6 +553,11 @@ Prérequis :
 				<name>NC_MCP_FILES_ROOT</name>
 				<display-name>Directory the file tools are bound to</display-name>
 				<description>A Nextcloud path such as /Documents/AI, the same for every account of this installation. Unset means the whole files area. When set, the file tools and the file results of search treat this directory as / and cannot reach its parent folders; Notes, Mail, Talk, calendars and the other tools keep their own permissions. A path with a parent reference, a backslash or without a leading slash stops the app at start.</description>			</variable>
+			<variable>
+				<name>NC_MCP_FILES_UPDATE</name>
+				<display-name>Allow updating existing files</display-name>
+				<description>Off unless set to on. When enabled, the files_update tool can replace existing UTF-8 text files only when their current ETag matches the supplied ETag.</description>
+			</variable>
 			<variable>
 				<name>NC_MCP_DISABLED_TOOLS</name>
 				<display-name>Tool bundles to switch off</display-name>

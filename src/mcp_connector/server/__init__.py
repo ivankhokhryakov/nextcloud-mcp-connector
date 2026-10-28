@@ -27,6 +27,7 @@ from typing import Any
 
 import httpx
 from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError as McpToolError
 from mcp.types import ToolAnnotations
 
 from .. import __version__, config, deps
@@ -38,7 +39,15 @@ from ..errors import (
     ToolError,
 )
 
-__all__ = ["CREATE_ONLY", "READ_ONLY", "bundle_names", "compact", "graceful", "mcp"]
+__all__ = [
+    "CREATE_ONLY",
+    "READ_ONLY",
+    "UPDATE_EXISTING",
+    "bundle_names",
+    "compact",
+    "graceful",
+    "mcp",
+]
 
 # (None, None) unless a static bearer is configured. The SDK rejects one without the
 # other with a ValueError in the constructor, so they are built as a pair.
@@ -51,7 +60,13 @@ mcp = MCPServer(
     version=__version__,
     instructions=(
         "Read and create content in the user's own Nextcloud. "
-        "This server can never delete, overwrite or re-share anything."
+        "Files are never deleted, moved, renamed or unconditionally overwritten."
+        + (
+            " Existing UTF-8 text files can be replaced with files_update, "
+            "and only with a matching ETag."
+            if config.files_update_enabled()
+            else ""
+        )
     ),
     token_verifier=_token_verifier,
     auth=_auth_settings,
@@ -62,6 +77,13 @@ READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=False)
 CREATE_ONLY = ToolAnnotations(
     read_only_hint=False,
     destructive_hint=False,
+    idempotent_hint=False,
+    open_world_hint=False,
+)
+
+UPDATE_EXISTING = ToolAnnotations(
+    read_only_hint=False,
+    destructive_hint=True,
     idempotent_hint=False,
     open_world_hint=False,
 )
@@ -110,16 +132,19 @@ def graceful[T](fn: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
             return await fn(*args, **kwargs)
         except ToolError as exc:
             outcome, reason = OUTCOME_REJECTED, getattr(exc, "reason", REASON_UNSPECIFIED)
-            raise ValueError(f"{exc.message} Hint: {exc.hint}") from None
+            # The SDK's own ToolError marks a failure the tool anticipated: the message
+            # reaches the model as an is_error result. Anything else (mcp >= 2.1) is
+            # treated as a crash whose text stays on the server.
+            raise McpToolError(f"{exc.message} Hint: {exc.hint}") from None
         except httpx.TimeoutException:
             outcome, reason = OUTCOME_REJECTED, REASON_TIMEOUT
-            raise ValueError(
+            raise McpToolError(
                 "Nextcloud did not respond in time. Hint: retry with a smaller range or a "
                 "narrower scope."
             ) from None
         except httpx.RequestError:
             outcome, reason = OUTCOME_REJECTED, REASON_UNREACHABLE
-            raise ValueError(
+            raise McpToolError(
                 "Could not reach Nextcloud. Hint: check the configured Nextcloud URL and "
                 "that the server is online."
             ) from None

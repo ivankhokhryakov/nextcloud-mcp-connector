@@ -109,6 +109,7 @@ def entry_xml(fileid: str, node: Node) -> str:
         f"<d:displayname>{node.path.rsplit('/', 1)[-1]}</d:displayname>"
         f"<d:getcontenttype>{ctype}</d:getcontenttype>{size}"
         f"<d:getlastmodified>Thu, 14 Aug 2026 10:00:00 GMT</d:getlastmodified>"
+        "<d:getetag>&quot;etag-1&quot;</d:getetag>"
         f"<d:resourcetype>{kind}</d:resourcetype><oc:fileid>{fileid}</oc:fileid>"
         "</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
     )

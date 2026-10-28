@@ -123,6 +123,7 @@ CONFIG_KEYS: tuple[str, ...] = (
     "oauth_allowed_clients",
     "talk_send",
     "audit_log",
+    "files_update",
 )
 
 #: The variable each key stands for. The overlay speaks the language of the deploy
@@ -135,6 +136,7 @@ KEY_TO_ENV: Mapping[str, str] = {
     "oauth_allowed_clients": registry.ENV_ALLOWED_CLIENTS,
     "talk_send": config.ENV_TALK_SEND,
     "audit_log": config.ENV_AUDIT_LOG,
+    "files_update": config.ENV_FILES_UPDATE,
 }
 
 #: The keys that carry a checkbox, named once so the validation cannot drift from the form.
@@ -143,7 +145,7 @@ KEY_TO_ENV: Mapping[str, str] = {
 #: the key out of the overlay, so the deploy variable and then the default in code decide,
 #: and that default is off (``config.audit_log_enabled``).
 SWITCH_KEYS: frozenset[str] = frozenset(
-    {"oauth_dcr", "oauth_cimd", "oauth_allowlist_only", "talk_send", "audit_log"}
+    {"oauth_dcr", "oauth_cimd", "oauth_allowlist_only", "talk_send", "audit_log", "files_update"}
 )
 
 #: The spellings a switch may arrive in. Aligned with the two sets of ``oauth/registry.py``
@@ -238,15 +240,18 @@ async def read_values(
         # not reported as a fault. Every other failure of this read stays an ERROR: none of
         # them is expected. Nothing else changes, the result stays empty and the deploy
         # environment stays in force.
+        # Issue #33: an update starts the new container inside the same window, while values
+        # are stored. The enable that follows reads them again and restarts this process
+        # once when they differ (``lifecycle._stored_values_differ``).
         logger.info(
             "the admin values were not read on this start: Nextcloud answered 401, which is "
             "the expected answer while AppAPI does not have this app on enabled yet, and the "
-            "first start after an installation is always inside that window. The deploy "
-            "environment stays in force, and the values are read again on the next start of "
-            "this container. That is why a value entered in the administration settings takes "
-            "effect after this app has been disabled and enabled once. If this line appears on "
-            "a start that followed an enable, then the app secret of this container is not the "
-            "one Nextcloud stored for it."
+            "first start after an installation or an update is always inside that window. The "
+            "deploy environment stays in force until the app is enabled, which reads the "
+            "values again and restarts this process once if they differ; a value changed later "
+            "takes effect after this app has been disabled and enabled once. If this line appears "
+            "on a start that followed an enable, then the app secret of this container is not "
+            "the one Nextcloud stored for it."
         )
         return {}
 

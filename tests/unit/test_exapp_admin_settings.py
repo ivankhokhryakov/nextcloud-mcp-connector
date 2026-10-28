@@ -124,7 +124,7 @@ async def test_the_admin_form_sits_in_the_admin_section() -> None:
 
     assert route.call_count == 1
     scheme = json.loads(route.calls.last.request.content)["formScheme"]
-    assert scheme["id"] == "mcp_connector_admin"
+    assert scheme["id"] == "admin_values"
     assert scheme["id"] == admin_settings.ADMIN_FORM_ID
     assert scheme["id"] != settings_form.FORM_ID, "two forms, two ids, one insertOrUpdate key"
     assert scheme["priority"] == 10
@@ -136,7 +136,7 @@ async def test_the_admin_form_sits_in_the_admin_section() -> None:
 
 @pytest.mark.anyio
 @respx.mock
-async def test_the_seven_fields_are_the_seven_config_keys_in_order() -> None:
+async def test_the_eight_fields_are_the_eight_config_keys_in_order() -> None:
     """The field id IS the configuration key, so form and read path cannot drift apart.
 
     Five since the audit of the v1.0 milestone: ``NC_MCP_OAUTH_CIMD`` existed as a deploy
@@ -162,6 +162,7 @@ async def test_the_seven_fields_are_the_seven_config_keys_in_order() -> None:
         "oauth_allowed_clients",
         "talk_send",
         "audit_log",
+        "files_update",
     ]
     assert tuple(field["id"] for field in fields) == config_values.CONFIG_KEYS
     assert [field["type"] for field in fields] == [
@@ -170,6 +171,7 @@ async def test_the_seven_fields_are_the_seven_config_keys_in_order() -> None:
         "checkbox",
         "checkbox",
         "text",
+        "checkbox",
         "checkbox",
         "checkbox",
     ]
@@ -326,13 +328,30 @@ async def test_the_audit_log_field_is_a_checkbox_that_ships_off() -> None:
     await admin_settings.register_admin_form(env=ENV)
 
     fields = json.loads(route.calls.last.request.content)["formScheme"]["fields"]
-    audit_log = fields[-1]
+    audit_log = next(field for field in fields if field["id"] == "audit_log")
     assert audit_log["id"] == "audit_log"
     assert audit_log["type"] == "checkbox"
     assert audit_log["default"] is False
     assert audit_log["title"] == strings.ADMIN_FIELD_AUDIT_LOG_LABEL
     assert audit_log["description"] == strings.ADMIN_FIELD_AUDIT_LOG_DESCRIPTION
     assert "sensitive" not in json.dumps(audit_log).lower()
+
+
+@pytest.mark.anyio
+@respx.mock
+async def test_the_files_update_field_is_a_checkbox_that_ships_off() -> None:
+    """The files update switch is opt-in and therefore ships disabled."""
+    route = respx.post(SETTINGS_URL).mock(return_value=httpx.Response(200, json={}))
+
+    await admin_settings.register_admin_form(env=ENV)
+
+    fields = json.loads(route.calls.last.request.content)["formScheme"]["fields"]
+    files_update = next(field for field in fields if field["id"] == "files_update")
+    assert files_update["type"] == "checkbox"
+    assert files_update["default"] is False
+    assert files_update["title"] == strings.ADMIN_FIELD_FILES_UPDATE_LABEL
+    assert files_update["description"] == strings.ADMIN_FIELD_FILES_UPDATE_DESCRIPTION
+    assert "sensitive" not in json.dumps(files_update).lower()
 
 
 @pytest.mark.anyio
@@ -429,7 +448,7 @@ async def test_no_field_of_the_form_offers_a_level_of_recording() -> None:
     await admin_settings.register_admin_form(env=ENV)
 
     fields = json.loads(route.calls.last.request.content)["formScheme"]["fields"]
-    assert len(fields) == 7, "every field of the form is walked, not a subset of it"
+    assert len(fields) == 8, "every field of the form is walked, not a subset of it"
     for field in fields:
         assert LEVEL_WORD.search(json.dumps(field).lower()) is None, (
             f"{field['id']} offers a level of recording this app cannot deliver"
@@ -675,6 +694,90 @@ def test_a_rejected_enable_registers_nothing() -> None:
 
     assert response.status_code == 401
     assert not route.called
+
+
+# --- issue #34: the id the settings frontend sends back -----------------------------
+
+
+def frontend_form_id(form_id: str, app_id: str = APP_ID) -> str:
+    """What ``DeclarativeSection.vue`` sends as ``formId`` when a value is saved.
+
+    ``this.form.id.replace(this.formApp + '_', '')``, verified in nextcloud/server stable35
+    and in the built ``settings-declarative-settings-forms.js`` of 34.0.3. A JavaScript
+    ``replace`` with a string pattern replaces the first occurrence anywhere in the string.
+    """
+    return form_id.replace(f"{app_id}_", "", 1)
+
+
+def test_the_admin_form_id_survives_the_frontend_unchanged() -> None:
+    """AppAPI's SetValueListener looks the form up by the id it receives, exactly."""
+    assert frontend_form_id(admin_settings.ADMIN_FORM_ID) == admin_settings.ADMIN_FORM_ID
+
+
+def test_the_id_up_to_0_6_1_did_not_survive_it() -> None:
+    """The counter proof: this is the id that arrived as ``admin`` and stored nothing."""
+    assert frontend_form_id(admin_settings.LEGACY_ADMIN_FORM_ID) == "admin"
+    assert admin_settings.LEGACY_ADMIN_FORM_ID != admin_settings.ADMIN_FORM_ID
+
+
+@pytest.mark.anyio
+@respx.mock
+async def test_the_old_registration_is_deleted_by_its_id() -> None:
+    route = respx.delete(SETTINGS_URL).mock(return_value=httpx.Response(200, json={}))
+
+    await admin_settings.retire_legacy_admin_form(env=ENV)
+
+    assert route.call_count == 1
+    request = route.calls.last.request
+    assert request.url.params["formId"] == "mcp_connector_admin"
+    assert request.headers["ex-app-id"] == APP_ID
+
+
+@pytest.mark.anyio
+@respx.mock
+async def test_an_old_registration_that_is_already_gone_is_not_a_fault(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """404 is the answer on every enable after the first one."""
+    respx.delete(SETTINGS_URL).mock(return_value=httpx.Response(404, json={}))
+
+    with caplog.at_level(logging.INFO, logger="mcp_connector.exapp.admin_settings"):
+        await admin_settings.retire_legacy_admin_form(env=ENV)
+
+    assert not caplog.records
+
+
+@pytest.mark.anyio
+@respx.mock
+@pytest.mark.parametrize("outcome", ["unreachable", "500"])
+async def test_a_failed_removal_costs_one_line_and_never_raises(
+    caplog: pytest.LogCaptureFixture, outcome: str
+) -> None:
+    route = respx.delete(SETTINGS_URL)
+    if outcome == "unreachable":
+        route.mock(side_effect=httpx.ConnectError("no route to nextcloud"))
+    else:
+        route.mock(return_value=httpx.Response(500, json={}))
+
+    with caplog.at_level(logging.INFO, logger="mcp_connector.exapp.admin_settings"):
+        await admin_settings.retire_legacy_admin_form(env=ENV)
+
+    errors = [record for record in caplog.records if record.levelno == logging.ERROR]
+    assert len(errors) == 1
+    assert APP_SECRET not in errors[0].getMessage()
+
+
+@respx.mock
+def test_enabling_the_app_removes_the_old_admin_form() -> None:
+    respx.post(SETTINGS_URL).mock(return_value=httpx.Response(200, json={}))
+    deleted = respx.delete(SETTINGS_URL).mock(return_value=httpx.Response(200, json={}))
+
+    with client() as http:
+        response = http.put("/enabled?enabled=1", headers=appapi_headers())
+
+    assert response.status_code == 200
+    assert response.json() == {"error": ""}
+    assert deleted.call_count == 1
 
 
 # --- the text catalogue -----------------------------------------------------------

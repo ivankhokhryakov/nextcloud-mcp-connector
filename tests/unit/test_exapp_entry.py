@@ -1180,6 +1180,9 @@ def deployed(
     # the delenv removes it again, and the teardown restores that unset state.
     monkeypatch.setenv(config.ENV_TALK_SEND, "")
     monkeypatch.delenv(config.ENV_TALK_SEND)
+    # The same for the second key ``main`` writes back since issue #31.
+    monkeypatch.setenv(config.ENV_FILES_UPDATE, "")
+    monkeypatch.delenv(config.ENV_FILES_UPDATE)
 
     for name, value in (env or {}).items():
         monkeypatch.setenv(name, value)
@@ -1848,24 +1851,65 @@ def test_a_stored_talk_switch_wins_over_the_deploy_variable(
     assert config.talk_send_enabled() is False
 
 
-def test_the_entry_point_writes_exactly_one_key_into_the_process_environment() -> None:
-    """The exception of D-20 stays one exception, and it keeps its reasoning.
+def test_a_stored_files_update_switch_wins_over_the_deploy_variable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, admin_config: AdminConfig
+) -> None:
+    """Issue #31, the direction that matters for safety: an unticked box disarms the write
+    tool even when the deploy environment armed it. Whether the tool is then registered is
+    proven in a fresh interpreter by tests/unit/test_exapp_files_update_switch.py."""
+    admin_config.values["files_update"] = "0"
 
-    Constructive rather than documented: a second write, or a write of the whole overlay,
-    fails here, and so does a refactor that keeps the line but drops the comment block that
-    explains why it contradicts the comment above it (A7).
+    start(monkeypatch, tmp_path, env={config.ENV_FILES_UPDATE: "on"})
+
+    assert os.environ[config.ENV_FILES_UPDATE] == config_values.SWITCH_OFF
+    assert config.files_update_enabled() is False
+
+
+def test_a_stored_files_update_switch_of_on_reaches_the_process_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, admin_config: AdminConfig
+) -> None:
+    """The report of issue #31: deploy off, the box ticked in Nextcloud."""
+    admin_config.values["files_update"] = "1"
+
+    start(monkeypatch, tmp_path, env={config.ENV_FILES_UPDATE: "off"})
+
+    assert os.environ[config.ENV_FILES_UPDATE] == config_values.SWITCH_ON
+    assert config.files_update_enabled() is True
+
+
+def test_a_start_without_a_stored_files_update_switch_leaves_the_variable_alone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Nothing stored and nothing deployed: no variable appears, and the tool stays off."""
+    start(monkeypatch, tmp_path)
+
+    assert config.ENV_FILES_UPDATE not in os.environ
+    assert config.files_update_enabled() is False
+
+
+def test_the_entry_point_writes_exactly_the_named_keys_into_the_process_environment() -> None:
+    """The exception of D-20 stays two named keys, and each keeps its reasoning.
+
+    Constructive rather than documented: a third write, or a write of the whole overlay,
+    fails here, and so does a refactor that keeps a line but drops the comment block that
+    explains why it contradicts the comment above it (A7). The second key is the switch of
+    files_update, which the registration of the tools reads (issue #31).
     """
     source = Path(entry_exapp.__file__).read_text(encoding="utf-8")
-    writes = re.findall(r"os\.environ\[[^\]]+\]\s*=", source)
+    pattern = r"os\.environ\[[^\]]+\]\s*="
+    writes = re.findall(pattern, source)
 
-    assert writes == ["os.environ[config.ENV_TALK_SEND] ="]
+    assert writes == [
+        "os.environ[config.ENV_TALK_SEND] =",
+        "os.environ[config.ENV_FILES_UPDATE] =",
+    ]
 
     lines = source.splitlines()
-    index = next(
-        number for number, line in enumerate(lines) if re.search(r"os\.environ\[[^\]]+\]\s*=", line)
-    )
-    reasoning = [line for line in lines[max(0, index - 14) : index] if line.strip().startswith("#")]
-    assert len(reasoning) >= 4
+    indices = [number for number, line in enumerate(lines) if re.search(pattern, line)]
+    for index in indices:
+        window = lines[max(0, index - 14) : index]
+        reasoning = [line for line in window if line.strip().startswith("#")]
+        assert len(reasoning) >= 4
 
 
 def test_the_write_happens_before_the_application_is_built() -> None:
@@ -1873,10 +1917,15 @@ def test_the_write_happens_before_the_application_is_built() -> None:
     source = Path(entry_exapp.__file__).read_text(encoding="utf-8")
 
     export = source.index("os.environ[config.ENV_TALK_SEND]")
+    files_update = source.index("os.environ[config.ENV_FILES_UPDATE]")
     resolved = source.index("resolved, refused = _resolved_env()")
+    built = source.index("build_exapp_app(resolved)")
     served = source.index("uvicorn.run(")
 
     assert resolved < export < served
+    # Before the first build, because that build is the first import of ``.server`` and
+    # therefore the moment files_update registers or not (issue #31).
+    assert resolved < files_update < built
 
 
 @pytest.mark.anyio

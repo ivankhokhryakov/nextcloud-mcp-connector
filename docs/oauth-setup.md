@@ -200,6 +200,14 @@ the next start. If the same line appears on a start that followed an `enable`, i
 something else and is worth looking at: the app secret inside the container is then not the
 one Nextcloud stored for this app.
 
+**After an update the app restarts itself once.** `occ app_api:app:update` disables the app,
+starts the new container and enables the app only after `init`, so the new container starts
+inside the same window while values are already stored. Since 0.6.2 the `enable` that follows
+reads the values again, and when they differ from the ones the process started with, the
+app answers the enable and then stops, so the container starts again and reads them (issue
+#33). The log says so in one warning line. This relies on the restart policy AppAPI gives the
+container, `unless-stopped` unless `container_restart_policy` of app_api was changed.
+
 One consequence worth knowing on an installation that has always used `--env`: as soon as
 the form is saved for the first time, Nextcloud stores a concrete value for both checkboxes,
 and from then on those two beat the variables. Clear the fields if the deploy environment

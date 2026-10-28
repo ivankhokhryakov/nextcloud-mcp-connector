@@ -102,7 +102,7 @@ async def test_existing_file_is_refused_with_the_no_overwrite_sentence(
     assert put.call_count == 1, "a conflict is final; never retry it as an overwrite"
     text = f"{excinfo.value.message} {excinfo.value.hint}"
     assert f"A file already exists at {TARGET}." in text
-    assert "This server never overwrites files." in text
+    assert "Uploads never overwrite existing files." in text
     assert "Choose a different name." in text
 
 
@@ -399,6 +399,75 @@ async def test_chatgpt_attachment_streams_to_create_only_put(clients: NcClients)
     }
 
 
+def _update_stat_xml(etag: str, *, fileid: str = "") -> str:
+    fileid_prop = f"<oc:fileid>{fileid}</oc:fileid>" if fileid else ""
+    return f"""<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">
+  <d:response>
+    <d:propstat>
+      <d:prop>
+        {fileid_prop}
+        <d:getcontentlength>13</d:getcontentlength>
+        <d:getcontenttype>text/markdown</d:getcontenttype>
+        <d:getlastmodified>Thu, 08 Oct 2026 10:00:00 GMT</d:getlastmodified>
+        <d:getetag>{etag}</d:getetag>
+        <d:resourcetype/>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"""
+
+
+def _versions_xml(versions: int) -> str:
+    """A DAV version listing: the collection itself plus one response per version."""
+    responses = "".join(
+        f"<d:response><d:href>/v/{index}</d:href></d:response>" for index in range(versions + 1)
+    )
+    return f'<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">{responses}</d:multistatus>'
+
+
+@pytest.mark.anyio
+async def test_update_replaces_text_file_with_caller_etag(clients: NcClients) -> None:
+    current_etag = '"caller-etag"'
+    new_etag = '"new-etag"'
+    with respx.mock(assert_all_called=True) as mock:
+        put = mock.route(method="PUT", url=TARGET_URL).mock(
+            return_value=httpx.Response(204, headers={"OC-ETag": new_etag})
+        )
+        mock.route(method="PROPFIND", url=TARGET_URL).mock(
+            return_value=httpx.Response(207, text=_update_stat_xml(current_etag, fileid="123"))
+        )
+        # The version listing is read before and after the PUT; one more entry afterwards
+        # is the proof that the overwritten content was retained.
+        mock.route(
+            method="PROPFIND",
+            url__regex=r".*/remote\.php/dav/versions/[^/]+/versions/123$",
+        ).mock(
+            side_effect=[
+                httpx.Response(207, text=_versions_xml(1)),
+                httpx.Response(207, text=_versions_xml(2)),
+            ]
+        )
+
+        result = await files_tools.update(
+            clients,
+            path=TARGET,
+            content="# Updated\n",
+            etag=current_etag,
+        )
+
+    assert put.calls[0].request.headers["if-match"] == current_etag
+    assert put.calls[0].request.content == b"# Updated\n"
+    assert put.calls[0].request.headers["content-type"] == "text/markdown"
+    assert result == {
+        "path": TARGET,
+        "etag": new_etag,
+        "size": 10,
+        "versioned": True,
+    }
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     "url",
@@ -596,3 +665,99 @@ async def test_attachment_staging_is_serialized(
         release.set()
     await asyncio.gather(first, second)
     assert calls == 2
+
+
+@pytest.mark.anyio
+async def test_update_without_version_listing_reports_versioned_unknown(
+    clients: NcClients,
+) -> None:
+    """A 404 version listing (app disabled, other backend) answers ``versioned: null``."""
+    with respx.mock as mock:
+        mock.route(method="PUT", url=TARGET_URL).mock(
+            return_value=httpx.Response(204, headers={"OC-ETag": '"next"'})
+        )
+        mock.route(method="PROPFIND", url=TARGET_URL).mock(
+            return_value=httpx.Response(207, text=_update_stat_xml('"caller-etag"', fileid="9"))
+        )
+        mock.route(
+            method="PROPFIND",
+            url__regex=r".*/remote\.php/dav/versions/[^/]+/versions/9$",
+        ).mock(return_value=httpx.Response(404))
+
+        result = await files_tools.update(clients, path=TARGET, content="x", etag='"caller-etag"')
+
+    assert result["versioned"] is None
+
+
+@pytest.mark.anyio
+async def test_update_stale_etag_is_refused_before_any_write(clients: NcClients) -> None:
+    with respx.mock as mock:
+        mock.route(method="PROPFIND", url=TARGET_URL).mock(
+            return_value=httpx.Response(207, text=_update_stat_xml('"current-etag"'))
+        )
+        put = mock.route(method="PUT", url=TARGET_URL).mock(return_value=httpx.Response(204))
+
+        with pytest.raises(ConflictError) as excinfo:
+            await files_tools.update(
+                clients,
+                path=TARGET,
+                content="# Unsafe update\n",
+                etag='"stale-etag"',
+            )
+
+    assert put.call_count == 0
+    text = f"{excinfo.value.message} {excinfo.value.hint}"
+    assert "changed or was deleted" in text
+    assert "Re-read the file" in text
+
+
+@pytest.mark.anyio
+async def test_update_lost_race_after_matching_read_is_one_conflict(clients: NcClients) -> None:
+    """The window between the comparison and the PUT stays covered by ``If-Match``."""
+    with respx.mock as mock:
+        mock.route(method="PROPFIND", url=TARGET_URL).mock(
+            return_value=httpx.Response(207, text=_update_stat_xml('"current-etag"'))
+        )
+        put = mock.route(method="PUT", url=TARGET_URL).mock(return_value=httpx.Response(412))
+
+        with pytest.raises(ConflictError) as excinfo:
+            await files_tools.update(
+                clients,
+                path=TARGET,
+                content="# Racing update\n",
+                etag='"current-etag"',
+            )
+
+    assert put.call_count == 1
+    assert "changed or was deleted" in excinfo.value.message
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "bad",
+    ["", "   ", "*", 'W/"abc"', '"W/abc"', '"stale", "current"', '"a" "b"', '"*", "x"', '""'],
+)
+async def test_update_refuses_everything_but_one_strong_etag(clients: NcClients, bad: str) -> None:
+    """SabreDAV honours ``*``, empty values and lists, so they never reach it (GHSA-grade)."""
+    with respx.mock as mock:
+        with pytest.raises(ToolError) as excinfo:
+            await files_tools.update(clients, path=TARGET, content="x", etag=bad)
+        assert len(mock.calls) == 0
+
+    assert "not one strong ETag" in excinfo.value.message
+
+
+@pytest.mark.anyio
+async def test_update_quotes_a_bare_etag_token(clients: NcClients) -> None:
+    """The unquoted form a client copies out of a JSON answer is accepted and quoted."""
+    with respx.mock as mock:
+        mock.route(method="PROPFIND", url=TARGET_URL).mock(
+            return_value=httpx.Response(207, text=_update_stat_xml('"abc123"'))
+        )
+        put = mock.route(method="PUT", url=TARGET_URL).mock(
+            return_value=httpx.Response(204, headers={"OC-ETag": '"next"'})
+        )
+
+        await files_tools.update(clients, path=TARGET, content="x", etag="abc123")
+
+    assert put.calls[0].request.headers["if-match"] == '"abc123"'

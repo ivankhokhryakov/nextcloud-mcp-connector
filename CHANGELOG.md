@@ -18,6 +18,53 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Validation completes before the destination write, preventing truncated source
   streams from creating partial files. Text/base64 modes remain compatible.
 
+## [0.6.2] - 2026-10-22
+
+### Fixed
+
+- Saving the admin settings works again on Nextcloud 34.0.3 and later. The
+  settings page sends the form id without the app prefix, so
+  `mcp_connector_admin` arrived as `admin`, matched no form, and nothing was
+  stored although the page reported success. The form now has the id
+  `admin_values`; the old registration is removed on enable, and values
+  saved before are kept. Thanks to @cms-77 (#34).
+- After an update, the stored admin settings are in force again. The new
+  container starts while the app is still disabled, so it could not read
+  them and ran with the deploy environment, including OAuth and audit
+  switches, until the next disable and enable. The enable that follows an
+  update now reads them again and restarts the app once when they differ.
+  Thanks to @cms-77 (#33).
+
+## [0.6.1] - 2026-10-22
+
+### Fixed
+
+- In the ExApp, the "Allow editing existing text files" admin setting now
+  decides whether `files_update` is offered. Before, only the deploy variable
+  `NC_MCP_FILES_UPDATE` did: a ticked box left the tool missing, and an
+  unticked box left it on when the variable said on. Disable and enable the
+  app once after changing the setting. Thanks to @cms-77 (#31).
+- The conflict hint of a create-only upload says that uploads never overwrite,
+  instead of claiming it for the whole server, which files_update made untrue.
+
+### Security
+
+- Dependencies with published advisories raised in the lock file: pillow
+  13.0.0 (used by the PPTX conversion), pypdf 6.21.2, opentelemetry-api
+  1.45.1 and certifi 2026.10.19. pip-audit over the shipped set is clean.
+
+## [0.6.0] - 2026-10-18
+
+### Added
+
+- `files_update`: replaces one existing UTF-8 text file, whole, and only when
+  the ETag from `files_read` (which now returns it) still matches; `*`, empty
+  values, weak validators and lists are refused before any request. Off by
+  default (`NC_MCP_FILES_UPDATE`). `versioned` is true when the version
+  listing grew, null when it cannot be read. Invisible, tagged and deleted
+  targets share one conflict sentence. Thanks to @Saket7002 (#9, #26) and
+  @DaniW42 for the live-tested review.
+
 - SECURITY.md with the two private reporting channels, CONTRIBUTING.md, issue
   and pull request templates, and THIRD-PARTY.md with the licences of the
   shipped dependencies.
@@ -52,6 +99,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   as `pyproject.toml` and the repository licence file.
 - Dependency lift after a pip-audit pass: httpx2 2.13.1 (PYSEC-2026-3846,
   -3848, -3849) and PyJWT 2.15.1 (PYSEC-2026-4141, -4183).
+- Dependency lift after a pip-audit pass: mcp 2.3.0 (CVE-2026-59951, session
+  accumulation in the stateful Streamable HTTP transport; this server runs the
+  stateless leg, so the lift closes the audit finding rather than a live
+  exposure). The SDK now surfaces only its own `ToolError` to the model and
+  masks every other exception as a generic crash, so the graceful wrapper
+  raises that type; the one honest sentence per error reaches the model
+  unchanged.
 
 ### Fixed
 
@@ -166,6 +220,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.3.0] - 2026-09-26
 
 ### Added
+
+- Optional `files_update`, disabled by default and registered only when
+  `NC_MCP_FILES_UPDATE` is enabled by an administrator. It replaces existing UTF-8 text files
+  using mandatory `If-Match` ETag checks and rejects stale or deleted files without retrying.
+  Each successful update records the path and old/new ETags in a dedicated audit table.
+  Previous-version retention depends on the Nextcloud storage backend.
 
 - `files_download` returns Nextcloud files as embedded MCP binary resources. It applies the
   caller's existing Nextcloud permissions, refuses folders and supports files of any total
@@ -977,7 +1037,10 @@ First release, submitted to the Nextcloud App Store.
   never sees more than that user sees in the web interface.
 - A privacy and data flow description, see [docs/privacy.md](docs/privacy.md).
 
-[Unreleased]: https://github.com/street1983nk/nextcloud-mcp-connector/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/street1983nk/nextcloud-mcp-connector/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/street1983nk/nextcloud-mcp-connector/compare/v0.6.1...v0.6.2
+[0.6.1]: https://github.com/street1983nk/nextcloud-mcp-connector/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/street1983nk/nextcloud-mcp-connector/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/street1983nk/nextcloud-mcp-connector/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/street1983nk/nextcloud-mcp-connector/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/street1983nk/nextcloud-mcp-connector/compare/v0.3.2...v0.4.0

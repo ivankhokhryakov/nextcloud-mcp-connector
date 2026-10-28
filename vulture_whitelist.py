@@ -20,6 +20,7 @@ files_search
 files_list
 files_read
 files_upload
+files_update
 files_download
 files_read_as_markdown
 calendar_list_events
@@ -335,3 +336,8 @@ _._decode_payload
 
 # OpenAI's file schema mandates file_name, but the destination uses only path.
 file_name
+
+# --- Issue #33 ------------------------------------------------------------------------
+# Starlette reads Response.background after the answer is sent; the enable hook sets it so
+# the restart runs only once AppAPI has its answer (exapp/lifecycle.py).
+background

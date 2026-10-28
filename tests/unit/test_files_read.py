@@ -96,6 +96,7 @@ async def test_read_returns_content_and_stable_fields(clients: NcClients) -> Non
         "content": CONTENT,
         "size": len(body),
         "content_type": "text/markdown",
+        "etag": '"etag-1"',
         "truncated": False,
     }
     assert "next_offset" not in result
