@@ -809,13 +809,13 @@ async def put_new_file_stream(
 ) -> dict:
     """Stream a create-only PUT without buffering the complete file in this process."""
     target = safe_path(path)
-    headers = {"If-None-Match": "*", "Content-Type": content_type}
-    if content_length is not None:
-        headers["Content-Length"] = str(content_length)
+    # The headers stay one literal dict so the no-destructive-calls gate can read the
+    # If-None-Match precondition straight off this call site.
+    length = {} if content_length is None else {"Content-Length": str(content_length)}
     response = await client.put(
         files_url(creds, target),
         content=data,
-        headers=headers,
+        headers={"If-None-Match": "*", "Content-Type": content_type, **length},
         auth=creds.auth(),
     )
     _check_write(response, target)
